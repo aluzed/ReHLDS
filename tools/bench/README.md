@@ -33,9 +33,26 @@ and `BENCH_SERVER_ARGS`, e.g. `+sys_scheduler 1`, to append arguments to the ser
 | `idle` | empty server, loop overhead and tick regularity |
 | `bots20` | 20 bots playing rounds (game DLL: AI, physics, movement) |
 | `bots20-hltv8` | 20 bots + 8 HLTV proxies receiving snapshots (send path) |
+| `clients8` | 8 protocol load clients, smoke test of `loadclient.py` |
+| `clients32` | full server: 32 protocol load clients at 100 commands/s and 100 snapshots/s |
 
 A scenario is a small `.env` file in `scenarios/`: `MAP`, `TICRATE`, `MAXPLAYERS`, `BOTS`,
-`HLTV`, `HLTV_UPDATERATE`, `WARMUP`, `DURATION`, `EXTRA_ARGS`.
+`HLTV`, `HLTV_UPDATERATE`, `CLIENTS`, `CLIENT_CMDRATE`, `WARMUP`, `DURATION`, `EXTRA_ARGS`.
+
+## Protocol load client
+
+`loadclient.py` (Python 3, no dependency) connects fake players to the server with the
+real GoldSrc protocol: challenge, `connect`, netchan with reliable acknowledgements and
+bzip2 fragment reassembly, sign-on (`new`, `sendres`, `spawn`, `sendents`), team join,
+then `clc_move` at `CLIENT_CMDRATE` with moving players and `clc_delta` acknowledgements.
+Server packets are only decoded during sign-on; in game the netchan header is enough, so
+one process drives 32 players.
+
+It records the interval between server packets of each client over the profiling window
+(`clients.json`), which the report shows as the client-perceived snapshot rate and jitter.
+
+The server runs with `sv_lan 1` (the Steam ticket is random), `mp_consistency 0` and
+`sv_rehlds_maxclients_from_single_ip` raised, all set by `run_server.sh` when `CLIENTS` > 0.
 
 ## How it works
 
@@ -52,9 +69,9 @@ A scenario is a small `.env` file in `scenarios/`: `MAP`, `TICRATE`, `MAXPLAYERS
 
 ## Limitations
 
-* HLTV proxies receive snapshots but send almost nothing, and they cap at about 30
-  updates per second each. Incoming load (`clc_move` at 100 Hz from 32 players) is not
-  reproduced yet: that needs a protocol-level load client.
+* HLTV proxies receive snapshots but send almost nothing; use `CLIENTS` for incoming load.
+* Load clients do not decode snapshots, so they do not exercise client-side prediction
+  or detect corrupted entity data; byte-exact checks belong to MT-004.
 * Bots make runs non-deterministic: tick metrics are stable within 1–2 % between runs,
   per-phase averages and p99 within 10–20 %. Compare several runs before concluding on
   a phase-level change.

@@ -18,6 +18,8 @@ TICRATE=1000
 BOTS=0
 HLTV=0
 HLTV_UPDATERATE=100
+CLIENTS=0
+CLIENT_CMDRATE=100
 WARMUP=20
 DURATION=30
 EXTRA_ARGS=
@@ -31,12 +33,18 @@ cpu_ticks() {
 cd "$hlds"
 export LD_LIBRARY_PATH=.
 
+# Protocol load clients all come from 127.0.0.1 and do not answer consistency checks
+client_args=
+if [ "$CLIENTS" -gt 0 ]; then
+	client_args="+mp_consistency 0 +sv_rehlds_maxclients_from_single_ip $CLIENTS"
+fi
+
 fifo=$out/console.fifo
 rm -f "$fifo"
 mkfifo "$fifo"
 
 ./hlds_linux -game cstrike -console -port 27015 \
-	+sv_lan 1 +maxplayers "$MAXPLAYERS" +sv_proxies "$HLTV" +sys_ticrate "$TICRATE" $EXTRA_ARGS ${BENCH_SERVER_ARGS:-} +map "$MAP" \
+	+sv_lan 1 +maxplayers "$MAXPLAYERS" +sv_proxies "$HLTV" +sys_ticrate "$TICRATE" $client_args $EXTRA_ARGS ${BENCH_SERVER_ARGS:-} +map "$MAP" \
 	< "$fifo" > "$out/server.log" 2>&1 &
 server_pid=$!
 
@@ -54,6 +62,14 @@ for i in $(seq 1 "$HLTV"); do
 	(sleep $((WARMUP + DURATION + 15)); echo quit) \
 		| ./hltv -port $((27020 + i)) +updaterate "$HLTV_UPDATERATE" +connect 127.0.0.1:27015 > "$out/hltv-$i.log" 2>&1 &
 done
+
+# Protocol load clients measure snapshot intervals over the profiling window
+if [ "$CLIENTS" -gt 0 ]; then
+	python3 "$(dirname "$0")/../loadclient.py" --server 127.0.0.1:27015 \
+		--clients "$CLIENTS" --cmdrate "$CLIENT_CMDRATE" \
+		--measure-at "$(( $(date +%s) + WARMUP ))" --duration "$DURATION" \
+		--output "$out/clients.json" > /dev/null 2> "$out/loadclient.log" &
+fi
 
 sleep "$WARMUP"
 send status

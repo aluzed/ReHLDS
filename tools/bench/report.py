@@ -10,6 +10,7 @@ its relative change against the baseline run.
 
 import argparse
 import csv
+import json
 import math
 import os
 import sys
@@ -93,6 +94,11 @@ class Run:
         self.columns = read_columns(os.path.join(path, "profile.csv"))
         self.stats = {name: stats(values) for name, values in self.columns.items()}
         self.frames = len(self.columns["tick_interval_us"])
+        clients_path = os.path.join(path, "clients.json")
+        self.clients = None
+        if os.path.exists(clients_path):
+            with open(clients_path) as f:
+                self.clients = json.load(f)
 
     @property
     def seconds(self):
@@ -166,6 +172,20 @@ def main():
     if cpu is not None:
         print(f"| Process CPU | {cell(cpu, base_cpu)} % of one core |")
     print()
+
+    if run.clients:
+        c = run.clients
+        bc = base.clients if base and base.clients else None
+
+        def client_cell(key):
+            return cell(c[key], bc[key] if bc and key in bc else None)
+
+        print(f"| Load clients in game | {c['ingame']} / {c['clients']} |")
+        if "interval_ms_avg" in c:
+            print(f"| Snapshots per client | {client_cell('snapshot_rate_per_client')} /s |")
+            print(f"| Snapshot interval p50 / p99 | {client_cell('interval_ms_p50')} / {client_cell('interval_ms_p99')} ms |")
+            print(f"| Snapshot interval jitter (stddev) | {client_cell('interval_ms_stddev')} ms |")
+        print()
 
     print("| Time (us) | avg | p50 | p95 | p99 | max |")
     print("|---|---|---|---|---|---|")

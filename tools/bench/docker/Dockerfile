@@ -13,5 +13,5 @@ RUN printf 'deb http://archive.debian.org/debian bullseye main\ndeb http://archi
  && apt-get -o Acquire::Retries=5 install -y \
       gcc-multilib g++-multilib build-essential \
       libc6-dev libc6-dev-i386 \
-      cmake git curl procps \
+      cmake git curl procps python3 \
  && rm -rf /var/lib/apt/lists/*

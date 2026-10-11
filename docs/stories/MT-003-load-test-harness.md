@@ -35,12 +35,13 @@ and get comparable numbers, so that every optimisation can be measured objective
 Implemented as `tools/bench/` (see its README), with a different load source than first
 planned:
 
-* **Network clients: HLTV proxies** shipped with HLDS instead of a custom protocol client.
-  They are real clients receiving snapshots of every entity, which exercises the gather /
-  encode / transmit path. They send almost nothing, so the incoming `clc_move` load is not
-  reproduced.
+* **Protocol load client** `tools/bench/loadclient.py`: fake players speaking the real
+  GoldSrc protocol (handshake, netchan, sign-on, `clc_move` at 100 Hz, delta acks).
+  32 of them reproduce a full public server (`clients32`).
+* **HLTV proxies** shipped with HLDS: network clients receiving snapshots of every entity.
 * **Moving players: ReGameDLL_CS bots**, built from source at a pinned commit.
-* Scenarios: `idle`, `bots20`, `bots20-hltv8` (the `flood` scenario is left for MT-303).
+* Scenarios: `idle`, `bots20`, `bots20-hltv8`, `clients8`, `clients32` (the `flood`
+  scenario is left for MT-303).
 * Baseline: [`docs/benchmarks/baseline-mt002.md`](../benchmarks/baseline-mt002.md).
 
 ## Acceptance criteria
@@ -50,11 +51,8 @@ planned:
 * [x] Two runs of the same build differ by < 5 % on p50 frame time (−3 % measured). Per-phase
       averages and p99 vary by 10–20 % because of the bots; CPU pinning does not help.
 * [x] Baseline report committed (profiler build, since upstream `master` has no profiler).
-* [ ] Client-perceived snapshot interval: not measured, needs the protocol load client.
-
-Follow-up: a protocol-level load client (connect, `clc_move` at 100 Hz, delta acks) to
-reproduce incoming load and measure snapshot intervals on the client side. Needed before
-MT-501 and to make epic 4 phase comparisons deterministic.
+* [x] Client-perceived snapshot interval: measured by the load clients (rate, p50/p99,
+      jitter) and shown in the report.
 
 ## Risks
 
