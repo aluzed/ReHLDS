@@ -2,7 +2,7 @@ name: C/C++ CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, 'feature/**']
     paths-ignore:
       - '**.md'
       - '.github/**'
@@ -159,7 +159,8 @@ jobs:
         shell: "pwsh"
 
       - name: Import PFX and sign
-        if: github.event_name != 'pull_request'
+        # Signing secrets only exist on the upstream repository, skip on forks
+        if: github.event_name != 'pull_request' && github.repository == 'rehlds/ReHLDS'
         env:
           KEY_PFX_PASS: ${{ secrets.KEY_PFX_PASS }}
         # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
@@ -304,7 +305,8 @@ jobs:
           #export for global use
           echo "GPG_LINUX_FINGERPRINT=$GPG_LINUX_FINGERPRINT" >> $GITHUB_ENV
         shell: bash
-        if: github.event_name != 'pull_request'
+        # Signing secrets only exist on the upstream repository, skip on forks
+        if: github.event_name != 'pull_request' && github.repository == 'rehlds/ReHLDS'
 
       - name: Build and Run unittests
         run: |
