@@ -31,9 +31,9 @@ detected, so that threading work cannot silently break the game.
 
 ## Acceptance criteria
 
-* [ ] CI replays at least 3 recorded sessions on every PR.
+* [ ] CI replays at least 3 recorded sessions on every push.
 * [ ] An intentional one-byte change in `SV_EmitPings` makes the job fail.
-* [ ] TSan job runs on PRs labelled `threading` and on `mt/main` nightly.
+* [ ] TSan job runs on every push to `feature/multithreading` and nightly.
 * [ ] Documented procedure to re-record sessions when an intended change alters output.
 
 ## Risks

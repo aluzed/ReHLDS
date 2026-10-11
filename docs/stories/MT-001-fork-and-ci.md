@@ -12,27 +12,27 @@ The existing workflow `.github/workflows/build.yml` builds Linux and Windows.
 
 ## User story
 
-As a developer, I want a fork with a clear branching model and green CI on every push,
-so that each story can be developed, reviewed and benchmarked in isolation.
+As a developer, I want a fork with a simple branching model and green CI on every push,
+so that each story can be developed and benchmarked on top of the previous ones.
 
 ## Scope
 
 * Fork `rehlds/ReHLDS` to the personal GitHub account; keep `upstream` as a second remote.
-* Branching: `master` mirrors upstream, `mt/main` is the integration branch, one
-  `mt/MT-xxx-short-name` branch per story, PRs into `mt/main`.
+* Branching: `master` mirrors upstream; all multithreading work lives on the single
+  branch `feature/multithreading`, one or more commits per story, each commit message
+  referencing the story ID (e.g. `feat: ... (MT-002)`).
 * Enable GitHub Actions on the fork; make sure the existing build workflow runs on
-  `mt/**` branches and PRs into `mt/main`.
-* Add a PR template referencing the story ID and requiring benchmark numbers when
-  the story touches the frame.
-* Document the upstream sync procedure (rebase `mt/main` on `upstream/master`).
+  pushes to `feature/**` branches.
+* Commit convention: story ID in the subject; commits touching the frame include
+  before/after `sv_profile` numbers in the body or in the story file.
+* Document the upstream sync procedure (rebase `feature/multithreading` on `upstream/master`).
 
 ## Acceptance criteria
 
-* [ ] Fork exists, `origin` = fork, `upstream` = `rehlds/ReHLDS`.
-* [ ] CI builds Linux (i386) and Windows on push to `mt/**` and on PRs.
-* [ ] `docs/` is present on `mt/main`.
-* [ ] `CONTRIBUTING`-style section in `docs/stories/README.md` or a separate file
-      explains branches and sync.
+* [x] Fork exists, `origin` = fork, `upstream` = `rehlds/ReHLDS`.
+* [ ] CI builds Linux (i386) and Windows on push to `feature/**`.
+* [x] `docs/` is present on `feature/multithreading`.
+* [x] The "Branching" section of `docs/stories/README.md` explains branches and sync.
 
 ## Risks
 

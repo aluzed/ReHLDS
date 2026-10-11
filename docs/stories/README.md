@@ -70,6 +70,24 @@ counts / high tick rates comes from. There is a **decision gate after phase 2**:
 MT-002 shows `SV_SendClientMessages` encode time is not a significant share of the
 frame on target servers, epic 4 is re-scoped.
 
+## Branching
+
+* `origin` is the fork `aluzed/ReHLDS`, `upstream` is `rehlds/ReHLDS`.
+* `master` mirrors `upstream/master` and is never committed to directly.
+* All work lives on `feature/multithreading`: one or more commits per story, with the
+  story ID in the commit subject, e.g. `feat: add per-phase server frame profiler (MT-002)`.
+* Sync with upstream:
+
+  ```
+  git fetch upstream
+  git checkout master && git merge --ff-only upstream/master && git push origin master
+  git checkout feature/multithreading && git rebase master
+  git push --force-with-lease origin feature/multithreading
+  ```
+
+* Generic, low-risk improvements meant for upstream (see MT-702) are cherry-picked onto
+  a separate branch from `master` when the PR is prepared.
+
 ## Explicit non-goals
 
 * Running physics, `Think`/`Touch`, player movement (`PM_Move`) or any game DLL code in
