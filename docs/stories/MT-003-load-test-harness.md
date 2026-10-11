@@ -30,14 +30,31 @@ and get comparable numbers, so that every optimisation can be measured objective
 * **Reference results** committed in `docs/benchmarks/` for `master` on a documented
   machine (CPU, kernel, governor).
 
+## Status
+
+Implemented as `tools/bench/` (see its README), with a different load source than first
+planned:
+
+* **Network clients: HLTV proxies** shipped with HLDS instead of a custom protocol client.
+  They are real clients receiving snapshots of every entity, which exercises the gather /
+  encode / transmit path. They send almost nothing, so the incoming `clc_move` load is not
+  reproduced.
+* **Moving players: ReGameDLL_CS bots**, built from source at a pinned commit.
+* Scenarios: `idle`, `bots20`, `bots20-hltv8` (the `flood` scenario is left for MT-303).
+* Baseline: [`docs/benchmarks/baseline-mt002.md`](../benchmarks/baseline-mt002.md).
+
 ## Acceptance criteria
 
-* [ ] `tools/bench/run.sh cs32` produces a report with tick p50/p99, jitter, per-phase
-      times and CPU usage.
-* [ ] Two runs of the same build differ by < 5 % on p50 frame time.
-* [ ] Baseline report for upstream `master` committed.
-* [ ] Client-perceived metric included: interval between snapshots received by the
-      load client (p99 and jitter).
+* [x] `tools/bench/run.sh <scenario>` produces a report with tick p50/p99, jitter,
+      per-phase times and CPU usage.
+* [x] Two runs of the same build differ by < 5 % on p50 frame time (−3 % measured). Per-phase
+      averages and p99 vary by 10–20 % because of the bots; CPU pinning does not help.
+* [x] Baseline report committed (profiler build, since upstream `master` has no profiler).
+* [ ] Client-perceived snapshot interval: not measured, needs the protocol load client.
+
+Follow-up: a protocol-level load client (connect, `clc_move` at 100 Hz, delta acks) to
+reproduce incoming load and measure snapshot intervals on the client side. Needed before
+MT-501 and to make epic 4 phase comparisons deterministic.
 
 ## Risks
 
