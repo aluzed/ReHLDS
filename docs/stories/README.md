@@ -33,6 +33,7 @@ current frame, the hard constraints and what can be parallelised.
 | [MT-103](MT-103-timer-precision-fixes.md) | Timer precision and profiling bug fixes | E1 Main loop timing | P1 | S | MT-002 |
 | [MT-104](MT-104-client-lookup-by-address.md) | O(1) client lookup by address | E1 Main loop timing | P2 | S | MT-002 |
 | [MT-105](MT-105-batched-socket-syscalls.md) | Batched socket syscalls (recvmmsg/sendmmsg) | E1 Main loop timing | P2 | M | MT-302 |
+| [MT-106](MT-106-snapshot-send-spreading.md) | Spread client snapshots over frames | E1 Main loop timing | P0 | S | MT-002, MT-003 |
 | [MT-201](MT-201-thread-safety-audit.md) | Thread-safety audit and global state map | E2 Threading foundations | P0 | M | – |
 | [MT-202](MT-202-job-system.md) | Thread primitives, worker pool and main-thread assertions | E2 Threading foundations | P0 | M | MT-201 |
 | [MT-203](MT-203-thread-safe-engine-services.md) | Thread-safe bit writer, printing and deferred errors | E2 Threading foundations | P0 | L | MT-201, MT-202 |
@@ -87,6 +88,36 @@ frame on target servers, epic 4 is re-scoped.
 
 * Generic, low-risk improvements meant for upstream (see MT-702) are cherry-picked onto
   a separate branch from `master` when the PR is prepared.
+
+## Status and decision gate (2026-10-12)
+
+Done: MT-002, MT-003, MT-101, MT-103, MT-106; MT-001 except the Windows CI run.
+
+Measured on a full server (`clients32`, see
+[`../benchmarks/clients32.md`](../benchmarks/clients32.md)): with the scheduler (MT-101)
+and snapshot spreading (MT-106), the server runs exact 1000 Hz ticks, every client gets
+exactly 100 snapshots/s with 0.1 ms jitter, and the frame p99 dropped from 587 µs to
+259 µs. The remaining per-frame work is small for a 1000 µs budget: `send_messages`
+≈ 45 µs and `read_packets` ≈ 23 µs on average.
+
+Consequences for the plan:
+
+* **Epic 4 (parallel snapshot encoding) is re-scoped.** The bursts that motivated it
+  (all 32 snapshots in one frame, ≈ 480 µs) were a scheduling artefact fixed by MT-106.
+  Parallelising the remaining ≈ 45 µs per frame would save a few tens of microseconds at
+  the cost of the riskiest refactor of the plan (thread-safe delta encoding, plugin
+  guards). It stays in the backlog for servers with many more slots or entities, to be
+  reconsidered with numbers from such a setup.
+* **MT-104** (client lookup by address): ≈ 160 ns per packet, 0.05 % of a core at
+  3200 packets/s. Deferred.
+* **MT-102** (wake on packet): with the scheduler, packets are processed on the tick
+  anyway; waking earlier only moves the receive syscalls. Folded into MT-302.
+* **MT-301** (async logs): log writes measured at 2 µs max with `log on`; only protects
+  against pathological disks. Kept, lower priority.
+* Remaining spikes come from the game DLL (bots' AI up to several ms) and from rare long
+  frames; they are outside the engine's reach. Stability work is better spent on the
+  network thread with early filtering (MT-302/MT-303), which protects the tick against
+  packet floods, and on Windows parity (CI).
 
 ## Explicit non-goals
 

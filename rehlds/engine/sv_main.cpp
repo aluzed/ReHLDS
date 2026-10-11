@@ -261,6 +261,7 @@ cvar_t sv_rcon_condebug = { "sv_rcon_condebug", "1", 0, 1.0f, nullptr };
 cvar_t sv_rehlds_userinfo_transmitted_fields = { "sv_rehlds_userinfo_transmitted_fields", "", 0, 0.0f, nullptr };
 cvar_t sv_rehlds_attachedentities_playeranimationspeed_fix = {"sv_rehlds_attachedentities_playeranimationspeed_fix", "0", 0, 0.0f, nullptr};
 cvar_t sv_rehlds_local_gametime = {"sv_rehlds_local_gametime", "0", 0, 0.0f, nullptr};
+cvar_t sv_rehlds_snapshot_spread = {"sv_rehlds_snapshot_spread", "0", 0, 0.0f, nullptr};
 cvar_t sv_rehlds_send_mapcycle = { "sv_rehlds_send_mapcycle", "0", 0, 0.0f, nullptr };
 cvar_t sv_rehlds_maxclients_from_single_ip = { "sv_rehlds_maxclients_from_single_ip", "5", 0, 5.0f, nullptr };
 cvar_t sv_use_entity_file = { "sv_use_entity_file", "0", 0, 0.0f, nullptr };
@@ -5288,6 +5289,26 @@ void SV_SkipUpdates(void)
 	}
 }
 
+#ifdef REHLDS_FIXES
+// Time of the next snapshot for a client, on a fixed per-client phase within its
+// update interval. With the original "now + interval", every client becomes due in
+// the same frame after any long frame and they stay aligned forever, so all the
+// snapshots of the server are built in one frame out of N. A fixed phase spreads
+// them evenly over the frames and keeps the update rate exact.
+double SV_NextSpreadMessageTime(client_t *cl)
+{
+	double interval = cl->next_messageinterval;
+	double now = realtime + host_frametime;
+	if (interval <= 0.0)
+		return now;
+
+	double phase = interval * (cl - g_psvs.clients) / g_psvs.maxclients;
+
+	// First phase-aligned time at least half an interval ahead
+	return phase + interval * floor((now + 1.5 * interval - phase) / interval);
+}
+#endif // REHLDS_FIXES
+
 void SV_SendClientMessages(void)
 {
 	SV_UpdateToReliableMessages();
@@ -5337,7 +5358,12 @@ void SV_SendClientMessages(void)
 			}
 
 			host_client->send_message = FALSE;
-			cl->next_messagetime = host_frametime + cl->next_messageinterval + realtime;
+#ifdef REHLDS_FIXES
+			if (sv_rehlds_snapshot_spread.value != 0.0f)
+				cl->next_messagetime = SV_NextSpreadMessageTime(cl);
+			else
+#endif // REHLDS_FIXES
+				cl->next_messagetime = host_frametime + cl->next_messageinterval + realtime;
 			if (cl->active && cl->spawned && cl->fully_connected)
 			{
 				g_FrameProfiler.AddCounter(FPC_CLIENTS_SENT, 1);
@@ -8609,6 +8635,7 @@ void SV_Init(void)
 	Cvar_RegisterVariable(&sv_rehlds_userinfo_transmitted_fields);
 	Cvar_RegisterVariable(&sv_rehlds_attachedentities_playeranimationspeed_fix);
 	Cvar_RegisterVariable(&sv_rehlds_local_gametime);
+	Cvar_RegisterVariable(&sv_rehlds_snapshot_spread);
 	Cvar_RegisterVariable(&sv_rehlds_send_mapcycle);
 	Cvar_RegisterVariable(&sv_rehlds_maxclients_from_single_ip);
 
