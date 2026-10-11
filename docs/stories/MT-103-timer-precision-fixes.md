@@ -39,9 +39,34 @@ so that scheduling decisions and measurements are trustworthy.
 
 ## Acceptance criteria
 
-* [ ] `host_profile 1` reports the same average as `sv_profile`.
-* [ ] `Sys_FloatTime` is callable concurrently from multiple threads (TSan clean).
-* [ ] Replay tests (MT-004) pass; behaviour without `REHLDS_FIXES` unchanged.
+* [ ] `host_profile 1` reports the same average as `sv_profile` — the double count is
+      fixed, but `host_profile` prints whole milliseconds, so the two cannot be compared on
+      frames of a few tens of microseconds.
+* [ ] `Sys_FloatTime` is callable concurrently from multiple threads (TSan clean) — the
+      Linux initialization is now thread-safe; concurrent test deferred to MT-202, which
+      links pthread, and TSan to MT-004.
+* [x] Unit tests pass (41, including the 2 new `Sys` tests); benchmark unchanged
+      (`bots20-hltv8` with scheduler: 999.8 fps).
+
+## Status
+
+Done, under `REHLDS_FIXES` where behaviour changes:
+
+* `host_profile`: frame no longer counted twice (`engine/host.cpp`).
+* Linux `Sys_FloatTime`: start time is a function-local static (thread-safe one-time
+  initialization) and the full start timespec is subtracted, via `Sys_MonotonicNs`.
+* `Host_GetTicrate` (added in MT-101) parses `-sys_ticrate` once instead of every frame.
+* `Host_FilterTime` threshold: unchanged in legacy mode; with the scheduler (MT-101) the
+  threshold is not used at all, which removes the `+1` bias and the float comparison.
+* New `rehlds/unittests/sys_tests.cpp`: monotonicity, sub-microsecond resolution, and
+  agreement with `Sys_MonotonicNs` over a 20 ms sleep.
+
+Not done:
+
+* **Windows `Sys_FloatTime`** (32-bit truncated counter, wrap heuristics, critical
+  section): left as is until the Windows CI build is available, because it goes through
+  the platform layer recorded by the testsuite and cannot be built or run locally.
+* `Host_Speeds` is already only computed when `host_speeds` is set (`REHLDS_FIXES`).
 
 ## Out of scope
 

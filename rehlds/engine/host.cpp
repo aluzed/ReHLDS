@@ -664,12 +664,17 @@ void Host_ClearMemory(qboolean bQuiet)
 float Host_GetTicrate(void)
 {
 	static int command_line_ticrate = -1;
+	static float command_line_value;
 
 	if (command_line_ticrate == -1)
+	{
 		command_line_ticrate = COM_CheckParm("-sys_ticrate");
+		if (command_line_ticrate > 0)
+			command_line_value = Q_atof(com_argv[command_line_ticrate + 1]);
+	}
 
 	if (command_line_ticrate > 0)
-		return Q_atof(com_argv[command_line_ticrate + 1]);
+		return command_line_value;
 
 	return sys_ticrate.value;
 }
@@ -1000,7 +1005,10 @@ int Host_Frame(float time, int iState, int *stateInfo)
 		static double timetotal;
 		static int timecount;
 
+#ifndef REHLDS_FIXES
+		// The frame was counted twice, halving the reported average
 		timecount++;
+#endif
 		timetotal += time2 - time1;
 		if (++timecount >= 1000)
 		{

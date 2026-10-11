@@ -230,6 +230,9 @@
     <ClCompile Include="..\unittests\struct_offsets_tests.cpp">
       <Filter>unittests</Filter>
     </ClCompile>
+    <ClCompile Include="..\unittests\sys_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
     <ClCompile Include="..\engine\com_custom.cpp">
       <Filter>engine\common</Filter>
     </ClCompile>

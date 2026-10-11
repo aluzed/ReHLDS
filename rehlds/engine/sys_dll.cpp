@@ -599,6 +599,13 @@ double EXT_FUNC Sys_FloatTime(void)
 
 double Sys_FloatTime(void)
 {
+#ifdef REHLDS_FIXES
+	// The start time is a function-local static, so its one-time initialization is
+	// thread-safe. The original code below races on bInitialized and only subtracts
+	// the seconds of the start time.
+	static const uint64 start_ns = Sys_MonotonicNs();
+	return (double)(Sys_MonotonicNs() - start_ns) * 0.000000001;
+#else
 	static struct timespec start_time;
 	static bool bInitialized = false;
 	struct timespec now;
@@ -610,6 +617,7 @@ double Sys_FloatTime(void)
 	}
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	return (now.tv_sec - start_time.tv_sec) + now.tv_nsec * 0.000000001;
+#endif // REHLDS_FIXES
 }
 
 #endif //_WIN32
