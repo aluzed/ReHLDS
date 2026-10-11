@@ -23,7 +23,8 @@ tools/bench/report.py .bench/results/<mychange run> --baseline .bench/results/<b
 `.bench/results/<date>-<scenario>-<engine>/`: `report.md`, `profile.csv` (one row per
 frame), `server.log`, `hltv-*.log`, `cpu.txt`, `meta.txt`.
 
-Set `BENCH_DOCKER_ARGS`, e.g. `--cpuset-cpus=6,7`, to pass extra options to `docker run`.
+Set `BENCH_DOCKER_ARGS`, e.g. `--cpuset-cpus=6,7`, to pass extra options to `docker run`,
+and `BENCH_SERVER_ARGS`, e.g. `+sys_scheduler 1`, to append arguments to the server command line.
 
 ## Scenarios
 

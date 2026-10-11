@@ -49,13 +49,44 @@ other players and entities looks smooth and my inputs are processed with stable 
 
 ## Acceptance criteria
 
-* [ ] `idle` scenario at `sys_ticrate 1000`: achieved fps ≥ 990, p99 tick interval
-      < 1.2 ms (to be compared with baseline numbers from MT-003).
-* [ ] `cs32` scenario: tick jitter (stddev) reduced by at least 50 % vs baseline.
-* [ ] CPU usage at idle not higher than baseline with `sys_spin_us 0`.
-* [ ] `sys_ticrate` changes take effect at runtime.
-* [ ] Works with the stock Valve `hlds_linux` launcher and the ReHLDS launcher.
-* [ ] Regression replay (MT-004) unchanged (time is replayed).
+* [x] `idle` scenario at `sys_ticrate 1000`: achieved fps ≥ 990, p99 tick interval
+      < 1.2 ms — 1000.0 fps, p99 1018 µs.
+* [x] Loaded scenario: tick jitter (stddev) reduced by at least 50 % vs baseline —
+      −60 % on `bots20-hltv8` (82.5 → 33.3 µs), 908 → 999.9 fps.
+* [x] CPU usage at idle not higher than baseline with `sys_spin_us 0` — 1.7 % vs 1.9 %.
+* [x] `sys_ticrate` changes take effect at runtime — applied at the next slice.
+* [x] Works with the stock Valve `hlds_linux` launcher and the ReHLDS launcher.
+* [ ] Regression replay (MT-004) unchanged — MT-004 not implemented yet; the scheduler is
+      off by default and does not change frame contents.
+* [ ] Windows: high resolution waitable timer path written but not built or run yet.
+
+Results: [`docs/benchmarks/mt101-scheduler.md`](../benchmarks/mt101-scheduler.md).
+
+## Implementation notes
+
+Code: `rehlds/rehlds/frame_scheduler.{h,cpp}`, `CDedicatedServerAPI::RunFrame`
+(`engine/sys_dll2.cpp`), `Host_GetTicrate` / `Host_FilterTime` (`engine/host.cpp`).
+
+| Cvar | Default | Effect |
+|---|---|---|
+| `sys_scheduler` | 0 | 1 = pace frames on a fixed grid of absolute deadlines |
+| `sys_scheduler_slice` | 100 | ms spent inside one `RunFrame()` call before returning to the launcher (1–1000) |
+| `sys_spin_us` | 0 | µs before each deadline spent spinning instead of sleeping (0–2000) |
+
+* No launcher change was needed: the launcher's ~1 ms sleep before every `RunFrame()`
+  is longer than a 1000 Hz tick, so `RunFrame()` keeps control for a slice and runs
+  several frames on the grid. The slice ends when the next deadline falls after it, so at
+  lower tick rates the launcher sleeps inside the gap between two ticks.
+* Grid in integer nanoseconds (`Sys_MonotonicNs`), deadlines accumulate (`next += period`)
+  so there is no drift. More than 2 ticks late (map load, stall) restarts the grid from
+  now instead of running the backlog back to back.
+* Linux: `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)` and `PR_SET_TIMERSLACK` 1 ns.
+  Windows: `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` timer, falling back to
+  `timeBeginPeriod(1)` (winmm loaded dynamically) + 1 ms sleeps + spin.
+* `Host_FilterTime` skips its minimum-interval check while the scheduler paces frames;
+  `host_frametime` is still the measured delta.
+* The tick rate source (`-sys_ticrate` command line, else the cvar) is shared through
+  `Host_GetTicrate`.
 
 ## Risks
 

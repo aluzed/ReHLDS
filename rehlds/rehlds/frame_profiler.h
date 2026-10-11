@@ -1,10 +1,7 @@
 #pragma once
 
 #include "archtypes.h"
-
-#ifndef _WIN32
-#include <time.h>
-#endif
+#include "monotonic_clock.h"
 
 // Timed sections of a server frame. A phase may be entered several times per
 // frame (e.g. once per client): its durations are summed for the frame.
@@ -97,15 +94,7 @@ private:
 
 	static uint64 Now()
 	{
-#ifdef _WIN32
-		LARGE_INTEGER counter;
-		QueryPerformanceCounter(&counter);
-		return (uint64)counter.QuadPart;
-#else
-		struct timespec ts;
-		clock_gettime(CLOCK_MONOTONIC, &ts);
-		return (uint64)ts.tv_sec * 1000000000ull + (uint64)ts.tv_nsec;
-#endif
+		return Sys_MonotonicNs();
 	}
 
 	bool Allocate();
@@ -116,7 +105,6 @@ private:
 
 	bool m_bActive;
 	bool m_bInFrame;
-	double m_TicksToUs;
 
 	uint64 m_PhaseStart[FPP_COUNT];
 	uint64 m_PhaseTicks[FPP_COUNT];

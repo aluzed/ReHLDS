@@ -660,10 +660,23 @@ void Host_ClearMemory(qboolean bQuiet)
 	SV_ClearClientStates();
 }
 
+// Target server frame rate: -sys_ticrate on the command line, else the sys_ticrate cvar
+float Host_GetTicrate(void)
+{
+	static int command_line_ticrate = -1;
+
+	if (command_line_ticrate == -1)
+		command_line_ticrate = COM_CheckParm("-sys_ticrate");
+
+	if (command_line_ticrate > 0)
+		return Q_atof(com_argv[command_line_ticrate + 1]);
+
+	return sys_ticrate.value;
+}
+
 qboolean Host_FilterTime(float time)
 {
 	float fps;
-	static int command_line_ticrate = -1;
 
 	if (host_framerate.value > 0.0f)
 	{
@@ -678,15 +691,10 @@ qboolean Host_FilterTime(float time)
 	realtime += sys_timescale.value * time;
 	if (g_bIsDedicatedServer)
 	{
-		if (command_line_ticrate == -1)
-			command_line_ticrate = COM_CheckParm("-sys_ticrate");
+		fps = Host_GetTicrate();
 
-		if (command_line_ticrate > 0)
-			fps = Q_atof(com_argv[command_line_ticrate + 1]);
-		else
-			fps = sys_ticrate.value;
-
-		if (fps > 0.0f)
+		// The frame scheduler already paces frames on a fixed tick grid
+		if (fps > 0.0f && !g_FrameScheduler.IsActive())
 		{
 			if (1.0f / (fps + 1.0f) > realtime - oldrealtime)
 				return FALSE;
@@ -1160,6 +1168,7 @@ int Host_Init(quakeparms_t *parms)
 	Rehlds_Security_Init();
 
 	FrameProfiler_Init();
+	FrameScheduler_Init();
 
 
 	Q_snprintf(versionString, sizeof(versionString), "%s,%i,%i", gpszVersionString, PROTOCOL_VERSION, build_number());
@@ -1261,6 +1270,7 @@ void Host_Shutdown(void)
 	Rehlds_Security_Shutdown();
 
 	FrameProfiler_Shutdown();
+	FrameScheduler_Shutdown();
 
 	Cmd_RemoveGameCmds();
 	Cmd_Shutdown();

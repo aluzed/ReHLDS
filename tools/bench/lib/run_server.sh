@@ -36,7 +36,7 @@ rm -f "$fifo"
 mkfifo "$fifo"
 
 ./hlds_linux -game cstrike -console -port 27015 \
-	+sv_lan 1 +maxplayers "$MAXPLAYERS" +sv_proxies "$HLTV" +sys_ticrate "$TICRATE" $EXTRA_ARGS +map "$MAP" \
+	+sv_lan 1 +maxplayers "$MAXPLAYERS" +sv_proxies "$HLTV" +sys_ticrate "$TICRATE" $EXTRA_ARGS ${BENCH_SERVER_ARGS:-} +map "$MAP" \
 	< "$fifo" > "$out/server.log" 2>&1 &
 server_pid=$!
 

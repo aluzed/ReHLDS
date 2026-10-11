@@ -317,6 +317,9 @@
     <ClCompile Include="..\rehlds\frame_profiler.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
+    <ClCompile Include="..\rehlds\frame_scheduler.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
     <ClCompile Include="..\engine\sse_mathfun.cpp">
       <Filter>engine</Filter>
     </ClCompile>
@@ -1037,6 +1040,12 @@
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\frame_profiler.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\frame_scheduler.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\monotonic_clock.h">
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\common\qlimits.h">

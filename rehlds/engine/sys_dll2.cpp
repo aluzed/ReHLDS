@@ -699,7 +699,22 @@ bool CDedicatedServerAPI::RunFrame()
 	if (eng->GetQuitting())
 		return false;
 
-	eng->Frame();
+	if (!g_FrameScheduler.IsEnabled())
+	{
+		eng->Frame();
+		return true;
+	}
+
+	// Run frames on the tick grid for one time slice, see CFrameScheduler
+	g_FrameScheduler.BeginSlice();
+	while (g_FrameScheduler.WaitForNextTick())
+	{
+		eng->Frame();
+		if (eng->GetQuitting())
+			break;
+	}
+	g_FrameScheduler.EndSlice();
+
 	return true;
 }
 

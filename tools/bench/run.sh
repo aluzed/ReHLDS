@@ -9,6 +9,7 @@
 #   tools/bench/build.sh baseline
 #   tools/bench/run.sh bots20-hltv8 baseline
 #   BENCH_DOCKER_ARGS="--cpuset-cpus=2,3" tools/bench/run.sh bots20-hltv8 baseline
+#   BENCH_SERVER_ARGS="+sys_scheduler 1" tools/bench/run.sh idle baseline
 set -euo pipefail
 . "$(dirname "$0")/lib/common.sh"
 
@@ -39,6 +40,7 @@ cp "$scenario_file" "$out/scenario.env"
 	echo "kernel=$(uname -r)"
 	echo "governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)"
 	echo "docker_args=${BENCH_DOCKER_ARGS:-}"
+	echo "server_args=${BENCH_SERVER_ARGS:-}"
 } > "$out/meta.txt"
 
 log "running '$scenario' with engine '$label'"

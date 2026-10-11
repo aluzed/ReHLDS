@@ -146,6 +146,8 @@ def main():
     print(f"* Commit: `{run.meta.get('engine_commit', '?')}`")
     print(f"* CPU: {run.meta.get('cpu', '?')}, governor {run.meta.get('governor', '?')}, "
           f"kernel {run.meta.get('kernel', '?')}")
+    if run.meta.get("server_args"):
+        print(f"* Server args: `{run.meta['server_args']}`")
     if run.meta.get("docker_args"):
         print(f"* Docker args: `{run.meta['docker_args']}`")
     print()

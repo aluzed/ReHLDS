@@ -30,6 +30,7 @@ in_container() {
 	docker run --rm -i \
 		-u "$(id -u):$(id -g)" \
 		-e HOME="$STEAM_HOME" \
+		-e BENCH_SERVER_ARGS="${BENCH_SERVER_ARGS:-}" \
 		-v "$BENCH_DIR:$BENCH_DIR" \
 		-v "$REPO_ROOT:$REPO_ROOT" \
 		${BENCH_DOCKER_ARGS:-} \

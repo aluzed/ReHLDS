@@ -20,6 +20,8 @@ CFrameProfiler g_FrameProfiler;
 
 namespace
 {
+	const double NS_TO_US = 0.001;
+
 	const int MIN_CAPACITY = 1000;
 	const int MAX_CAPACITY = 600000;
 
@@ -80,7 +82,6 @@ CFrameProfiler::CFrameProfiler()
 {
 	m_bActive = false;
 	m_bInFrame = false;
-	m_TicksToUs = 0.001;
 
 	Q_memset(m_PhaseStart, 0, sizeof(m_PhaseStart));
 	Q_memset(m_PhaseTicks, 0, sizeof(m_PhaseTicks));
@@ -99,14 +100,6 @@ CFrameProfiler::CFrameProfiler()
 
 void CFrameProfiler::Init()
 {
-#ifdef _WIN32
-	LARGE_INTEGER freq;
-	QueryPerformanceFrequency(&freq);
-	m_TicksToUs = 1000000.0 / (double)freq.QuadPart;
-#else
-	m_TicksToUs = 0.001; // nanoseconds
-#endif
-
 	Cvar_RegisterVariable(&sv_profile_enable);
 	Cvar_RegisterVariable(&sv_profile_frames);
 
@@ -220,10 +213,10 @@ void CFrameProfiler::EndFrame()
 	if (m_TickInterval)
 	{
 		float *row = &m_Rows[m_Head * COL_COUNT];
-		row[COL_TICK_INTERVAL] = (float)(m_TickInterval * m_TicksToUs);
+		row[COL_TICK_INTERVAL] = (float)(m_TickInterval * NS_TO_US);
 
 		for (int i = 0; i < FPP_COUNT; i++)
-			row[COL_PHASES + i] = (float)(m_PhaseTicks[i] * m_TicksToUs);
+			row[COL_PHASES + i] = (float)(m_PhaseTicks[i] * NS_TO_US);
 
 		for (int i = 0; i < FPC_COUNT; i++)
 			row[COL_COUNTERS + i] = (float)m_Counters[i];
@@ -356,7 +349,7 @@ void CFrameProfiler::Cmd_Profile()
 		return;
 
 	ClearRows();
-	m_CaptureEnd = Now() + (uint64)(seconds * 1000000.0 / m_TicksToUs);
+	m_CaptureEnd = Now() + (uint64)(seconds * 1000000000.0);
 	Con_Printf("sv_profile: recording %.1f s\n", seconds);
 }
 

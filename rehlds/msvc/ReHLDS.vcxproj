@@ -141,6 +141,7 @@
     <ClCompile Include="..\rehlds\RehldsRuntimeConfig.cpp" />
     <ClCompile Include="..\rehlds\rehlds_security.cpp" />
     <ClCompile Include="..\rehlds\frame_profiler.cpp" />
+    <ClCompile Include="..\rehlds\frame_scheduler.cpp" />
     <ClCompile Include="..\rehlds\structSizeCheck.cpp" />
     <ClCompile Include="..\testsuite\anonymizer.cpp" />
     <ClCompile Include="..\testsuite\funccalls.cpp" />
@@ -456,6 +457,8 @@
     <ClInclude Include="..\rehlds\rehlds_interfaces_impl.h" />
     <ClInclude Include="..\rehlds\rehlds_security.h" />
     <ClInclude Include="..\rehlds\frame_profiler.h" />
+    <ClInclude Include="..\rehlds\frame_scheduler.h" />
+    <ClInclude Include="..\rehlds\monotonic_clock.h" />
     <ClInclude Include="..\testsuite\anonymizer.h" />
     <ClInclude Include="..\testsuite\funccalls.h" />
     <ClInclude Include="..\testsuite\memory.h" />
