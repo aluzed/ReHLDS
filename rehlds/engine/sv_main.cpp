@@ -1303,7 +1303,9 @@ void SV_WriteClientdataToMessage(client_t *client, sizebuf_t *msg)
 	}
 
 	Q_memset(&frame->clientdata, 0, sizeof(frame->clientdata));
+	g_FrameProfiler.BeginPhase(FPP_SEND_GATHER);
 	gEntityInterface.pfnUpdateClientData(ent, host_client->lw != 0, &frame->clientdata);
+	g_FrameProfiler.EndPhase(FPP_SEND_GATHER);
 
 	MSG_WriteByte(msg, svc_clientdata);
 
@@ -1331,7 +1333,15 @@ void SV_WriteClientdataToMessage(client_t *client, sizebuf_t *msg)
 
 	DELTA_WriteDelta((byte *)from, (byte *)to, TRUE, (delta_t *)g_pclientdelta, NULL);
 
-	if (host_client->lw && gEntityInterface.pfnGetWeaponData(host_client->edict, frame->weapondata))
+	qboolean hasWeaponData = FALSE;
+	if (host_client->lw)
+	{
+		g_FrameProfiler.BeginPhase(FPP_SEND_GATHER);
+		hasWeaponData = gEntityInterface.pfnGetWeaponData(host_client->edict, frame->weapondata);
+		g_FrameProfiler.EndPhase(FPP_SEND_GATHER);
+	}
+
+	if (hasWeaponData)
 	{
 		weapon_data_t wbaseline;
 		Q_memset(&wbaseline, 0, sizeof(wbaseline));
@@ -3925,6 +3935,9 @@ void SV_ReadPackets(void)
 {
 	while (NET_GetPacket(NS_SERVER))
 	{
+		g_FrameProfiler.AddCounter(FPC_PACKETS_IN, 1);
+		g_FrameProfiler.AddCounter(FPC_BYTES_IN, net_message.cursize);
+
 #ifndef REHLDS_FIXES
 		if (SV_FilterPacket())
 		{
@@ -3950,8 +3963,10 @@ void SV_ReadPackets(void)
 				}
 #endif
 
+				g_FrameProfiler.BeginPhase(FPP_CONNECTIONLESS);
 				Steam_HandleIncomingPacket(net_message.data, net_message.cursize, ntohl(*(u_long *)&net_from.ip[0]), htons(net_from.port));
 				SV_ConnectionlessPacket();
+				g_FrameProfiler.EndPhase(FPP_CONNECTIONLESS);
 			}
 
 			continue;
@@ -3970,23 +3985,35 @@ void SV_ReadPackets(void)
 				continue;
 			}
 
-			if (Netchan_Process(&cl->netchan))
+			g_FrameProfiler.BeginPhase(FPP_NETCHAN_PROCESS);
+			qboolean processed = Netchan_Process(&cl->netchan);
+			g_FrameProfiler.EndPhase(FPP_NETCHAN_PROCESS);
+
+			if (processed)
 			{
 				if (g_psvs.maxclients == 1 || !cl->active || !cl->spawned || !cl->fully_connected)
 				{
 					cl->send_message = TRUE;
 				}
 
+				g_FrameProfiler.BeginPhase(FPP_EXECUTE_CLIENT_MSG);
 				SV_ExecuteClientMessage(cl);
+				g_FrameProfiler.EndPhase(FPP_EXECUTE_CLIENT_MSG);
 				gGlobalVariables.frametime = host_frametime;
 			}
 
 			if (Netchan_IncomingReady(&cl->netchan))
 			{
-				if (Netchan_CopyNormalFragments(&cl->netchan))
+				g_FrameProfiler.BeginPhase(FPP_NETCHAN_PROCESS);
+				qboolean fragmentsReady = Netchan_CopyNormalFragments(&cl->netchan);
+				g_FrameProfiler.EndPhase(FPP_NETCHAN_PROCESS);
+
+				if (fragmentsReady)
 				{
 					MSG_BeginReading();
+					g_FrameProfiler.BeginPhase(FPP_EXECUTE_CLIENT_MSG);
 					SV_ExecuteClientMessage(cl);
+					g_FrameProfiler.EndPhase(FPP_EXECUTE_CLIENT_MSG);
 				}
 				if (Netchan_CopyFileFragments(&cl->netchan))
 				{
@@ -4904,6 +4931,7 @@ void SV_WriteEntitiesToClient(client_t *client, sizebuf_t *msg)
 
 	unsigned char *pvs = NULL;
 	unsigned char *pas = NULL;
+	g_FrameProfiler.BeginPhase(FPP_SEND_GATHER);
 	gEntityInterface.pfnSetupVisibility((edict_t*)client->pViewEntity, client->edict, &pvs, &pas);
 	unsigned char *pSet = pvs;
 
@@ -4961,6 +4989,9 @@ void SV_WriteEntitiesToClient(client_t *client, sizebuf_t *msg)
 			++curPack->num_entities;
 #endif //REHLDS_OPT_PEDANTIC
 	}
+
+	g_FrameProfiler.EndPhase(FPP_SEND_GATHER);
+	g_FrameProfiler.AddCounter(FPC_ENTITIES_SENT, curPack->num_entities);
 
 #ifdef REHLDS_FIXES
 	int attachedEntCount[MAX_CLIENTS + 1] = {};
@@ -5069,6 +5100,7 @@ qboolean SV_SendClientDatagram(client_t *client)
 		MSG_WriteFloat(&msg, g_psv.time);
 	}
 
+	g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
 	SV_WriteClientdataToMessage(client, &msg);
 	SV_WriteEntitiesToClient(client, &msg);
 
@@ -5095,8 +5127,11 @@ qboolean SV_SendClientDatagram(client_t *client)
 		Con_Printf("WARNING: msg overflowed for %s\n", client->name);
 		SZ_Clear(&msg);
 	}
+	g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
 
+	g_FrameProfiler.BeginPhase(FPP_SEND_TRANSMIT);
 	Netchan_Transmit(&client->netchan, msg.cursize, buf);
+	g_FrameProfiler.EndPhase(FPP_SEND_TRANSMIT);
 
 #ifdef REHLDS_FIXES
 	DELTA_ClearTimeBaseOverride();
@@ -5304,7 +5339,10 @@ void SV_SendClientMessages(void)
 			host_client->send_message = FALSE;
 			cl->next_messagetime = host_frametime + cl->next_messageinterval + realtime;
 			if (cl->active && cl->spawned && cl->fully_connected)
+			{
+				g_FrameProfiler.AddCounter(FPC_CLIENTS_SENT, 1);
 				SV_SendClientDatagram(cl);
+			}
 			else
 				Netchan_Transmit(&cl->netchan, 0, NULL);
 		}
@@ -8311,18 +8349,34 @@ void EXT_FUNC SV_Frame_Internal()
 	gGlobalVariables.frametime = host_frametime;
 	g_psv.oldtime = g_psv.time;
 	SV_CheckCmdTimes();
+
+	g_FrameProfiler.BeginPhase(FPP_READ_PACKETS);
 	SV_ReadPackets();
+	g_FrameProfiler.EndPhase(FPP_READ_PACKETS);
+
 	if (SV_IsSimulating())
 	{
+		g_FrameProfiler.BeginPhase(FPP_PHYSICS);
 		SV_Physics();
+		g_FrameProfiler.EndPhase(FPP_PHYSICS);
 		g_psv.time += host_frametime;
 	}
 	SV_RequestMissingResourcesFromClients();
+
+	g_FrameProfiler.BeginPhase(FPP_CHECK_TIMEOUTS);
 	SV_CheckTimeouts();
+	g_FrameProfiler.EndPhase(FPP_CHECK_TIMEOUTS);
+
+	g_FrameProfiler.BeginPhase(FPP_SEND_MESSAGES);
 	SV_SendClientMessages();
+	g_FrameProfiler.EndPhase(FPP_SEND_MESSAGES);
+
 	SV_CheckMapDifferences();
 	SV_GatherStatistics();
+
+	g_FrameProfiler.BeginPhase(FPP_STEAM);
 	Steam_RunFrame();
+	g_FrameProfiler.EndPhase(FPP_STEAM);
 }
 
 void SV_Drop_f(void)

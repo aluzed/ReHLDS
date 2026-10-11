@@ -1417,6 +1417,12 @@ void NET_SendPacket(netsrc_t sock, int length, void *data, const netadr_t& to)
 	struct sockaddr addr;
 	NetadrToSockadr(&to, &addr);
 
+	if (sock == NS_SERVER)
+	{
+		g_FrameProfiler.AddCounter(FPC_PACKETS_OUT, 1);
+		g_FrameProfiler.AddCounter(FPC_BYTES_OUT, length);
+	}
+
 	int ret = NET_SendLong(sock, net_socket, (const char *)data, length, 0, &addr, sizeof(addr));
 	if (ret == -1)
 	{

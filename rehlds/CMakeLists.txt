@@ -175,6 +175,7 @@ set(ENGINE_SRCS
 	engine/sse_mathfun.cpp
 	engine/public_amalgamation.cpp
 	rehlds/flight_recorder.cpp
+	rehlds/frame_profiler.cpp
 	rehlds/FlightRecorderImpl.cpp
 	rehlds/hookchains_impl.cpp
 	rehlds/main.cpp

@@ -314,6 +314,9 @@
     <ClCompile Include="..\rehlds\rehlds_security.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
+    <ClCompile Include="..\rehlds\frame_profiler.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
     <ClCompile Include="..\engine\sse_mathfun.cpp">
       <Filter>engine</Filter>
     </ClCompile>
@@ -1031,6 +1034,9 @@
       <Filter>unittests</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\rehlds_security.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\frame_profiler.h">
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\common\qlimits.h">

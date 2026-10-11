@@ -870,7 +870,12 @@ void _Host_Frame(float time)
 
 	//Unknown_windows_func_01D37CD0();
 	if (!Host_FilterTime(time))
+	{
+		g_FrameProfiler.FrameRejected();
 		return;
+	}
+
+	g_FrameProfiler.BeginFrame();
 
 #ifdef REHLDS_FLIGHT_REC
 	static long frameCounter = 0;
@@ -887,14 +892,18 @@ void _Host_Frame(float time)
 	Host_ComputeFPS(host_frametime);
 	R_SetStackBase();
 	CL_CheckClientState();
+	g_FrameProfiler.BeginPhase(FPP_CBUF);
 	Cbuf_Execute();
+	g_FrameProfiler.EndPhase(FPP_CBUF);
 	ClientDLL_UpdateClientData();
 
 	if (g_psv.active)
 		CL_Move();
 
 	host_times[1] = Sys_FloatTime();
+	g_FrameProfiler.BeginPhase(FPP_SV_FRAME);
 	SV_Frame();
+	g_FrameProfiler.EndPhase(FPP_SV_FRAME);
 	host_times[2] = Sys_FloatTime();
 	SV_CheckForRcon();
 
@@ -946,6 +955,8 @@ void _Host_Frame(float time)
 	}
 	frameCounter++;
 #endif //REHLDS_FLIGHT_REC
+
+	g_FrameProfiler.EndFrame();
 }
 
 int Host_Frame(float time, int iState, int *stateInfo)
@@ -1148,6 +1159,8 @@ int Host_Init(quakeparms_t *parms)
 	//Rehlds Security
 	Rehlds_Security_Init();
 
+	FrameProfiler_Init();
+
 
 	Q_snprintf(versionString, sizeof(versionString), "%s,%i,%i", gpszVersionString, PROTOCOL_VERSION, build_number());
 	Cvar_Set("sv_version", versionString);
@@ -1246,6 +1259,8 @@ void Host_Shutdown(void)
 
 	//Rehlds Security
 	Rehlds_Security_Shutdown();
+
+	FrameProfiler_Shutdown();
 
 	Cmd_RemoveGameCmds();
 	Cmd_Shutdown();

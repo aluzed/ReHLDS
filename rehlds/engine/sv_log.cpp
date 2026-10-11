@@ -84,7 +84,11 @@ void Log_Printf(const char *fmt, ...)
 		if (g_psvs.log.file)
 		{
 			if (mp_logfile.value != 0.0f)
+			{
+				g_FrameProfiler.BeginPhase(FPP_LOG_WRITE);
 				FS_FPrintf((FileHandle_t)g_psvs.log.file, "%s", string);
+				g_FrameProfiler.EndPhase(FPP_LOG_WRITE);
+			}
 		}
 	}
 }
