@@ -329,6 +329,9 @@
     <ClCompile Include="..\rehlds\net_receive_thread.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
+    <ClCompile Include="..\rehlds\net_replay.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
     <ClCompile Include="..\engine\sse_mathfun.cpp">
       <Filter>engine</Filter>
     </ClCompile>
@@ -1055,6 +1058,9 @@
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\net_receive_thread.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\net_replay.h">
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\threading\spsc_ring.h">

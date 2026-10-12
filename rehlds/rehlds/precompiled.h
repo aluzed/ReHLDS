@@ -54,6 +54,7 @@
 #include "frame_profiler.h"
 #include "frame_scheduler.h"
 #include "net_receive_thread.h"
+#include "net_replay.h"
 
 #include "dlls/cdll_dll.h"
 #include "hltv.h"

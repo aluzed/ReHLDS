@@ -31,6 +31,9 @@ in_container() {
 		-u "$(id -u):$(id -g)" \
 		-e HOME="$STEAM_HOME" \
 		-e BENCH_SERVER_ARGS="${BENCH_SERVER_ARGS:-}" \
+		-e BENCH_RECORD="${BENCH_RECORD:-0}" \
+		-e BENCH_NO_ASLR="${BENCH_NO_ASLR:-}" \
+		-e BENCH_HELGRIND="${BENCH_HELGRIND:-OFF}" \
 		-v "$BENCH_DIR:$BENCH_DIR" \
 		-v "$REPO_ROOT:$REPO_ROOT" \
 		${BENCH_DOCKER_ARGS:-} \

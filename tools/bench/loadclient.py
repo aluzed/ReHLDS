@@ -40,6 +40,7 @@ SVC_PRINT = 8
 SVC_SERVERINFO = 11
 
 IN_JUMP = 1 << 1
+IN_SCORE = 1 << 15
 
 MUNGE_TABLE_1 = bytes([0x7A, 0x64, 0x05, 0xF1, 0x1B, 0x9B, 0xA0, 0xB5, 0xCA, 0xED, 0x61, 0x0D, 0x4A, 0xDF, 0x8E, 0xC7])
 MUNGE_TABLE_2 = bytes([0x05, 0x61, 0x7A, 0xED, 0x1B, 0xCA, 0x0D, 0x9B, 0x4A, 0xF1, 0x64, 0xC7, 0xB5, 0x8E, 0xDF, 0xA0])
@@ -325,6 +326,8 @@ class Client:
         self.next_send = 0.0
         self.state_since = 0.0
         self.yaw = random.uniform(0, 360)
+        self.next_scoreboard = 0.0
+        self.scoreboard_until = 0.0
         self.last_receive = None
         self.intervals = []
         self.ingame_commands = []
@@ -409,13 +412,22 @@ class Client:
 
     def build_move(self, sequence, now):
         self.yaw = (self.yaw + random.uniform(-4, 4)) % 360
+
+        # Look at the scoreboard for a second every few seconds, like players do:
+        # the server then sends this client the pings (SV_EmitPings)
+        if now >= self.next_scoreboard:
+            self.scoreboard_until = now + 1.0
+            self.next_scoreboard = now + random.uniform(6.0, 10.0)
+        buttons = IN_SCORE if now < self.scoreboard_until else 0
+        if random.random() < 0.01:
+            buttons |= IN_JUMP
         cmd = {
             "lerp_msec": 100,
             "msec": int(1000 / self.cmdrate),
             "yaw": self.yaw,
             "forwardmove": 250,
             "sidemove": random.choice((0, 0, 0, 250, -250)),
-            "buttons": IN_JUMP if random.random() < 0.01 else 0,
+            "buttons": buttons,
         }
         region = bytearray([0, 0, 1]) + encode_usercmd(cmd)  # loss, backup, numcmds
         checksum = block_sequence_crc_byte(region, sequence)

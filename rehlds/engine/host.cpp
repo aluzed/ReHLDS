@@ -694,6 +694,14 @@ qboolean Host_FilterTime(float time)
 	}
 
 	realtime += sys_timescale.value * time;
+#ifdef REHLDS_FIXES
+	if (g_NetReplay.IsReplaying())
+	{
+		// Recorded frames were all accepted: replay their time
+		realtime = g_NetReplay.ReplayFrame(realtime);
+	}
+	else
+#endif
 	if (g_bIsDedicatedServer)
 	{
 		fps = Host_GetTicrate();
@@ -735,6 +743,11 @@ qboolean Host_FilterTime(float time)
 				return FALSE;
 		}
 	}
+
+#ifdef REHLDS_FIXES
+	if (g_NetReplay.IsRecording())
+		g_NetReplay.RecordFrame(realtime);
+#endif
 
 	host_frametime = realtime - oldrealtime;
 	oldrealtime = realtime;
@@ -1121,7 +1134,11 @@ int Host_Init(quakeparms_t *parms)
 {
 	char versionString[256];
 
+#ifdef REHLDS_FIXES
+	CRehldsPlatformHolder::get()->srand((uint32)g_NetReplay.Value(CRehldsPlatformHolder::get()->time(NULL)));
+#else
 	CRehldsPlatformHolder::get()->srand(CRehldsPlatformHolder::get()->time(NULL));
+#endif
 
 	Q_memcpy(&host_parms, parms, sizeof(host_parms));
 	com_argc = parms->argc;

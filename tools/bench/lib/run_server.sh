@@ -47,9 +47,18 @@ fifo=$out/console.fifo
 rm -f "$fifo"
 mkfifo "$fifo"
 
-./hlds_linux -game cstrike -console -port 27015 \
-	+sv_lan 1 +maxplayers "$MAXPLAYERS" +sv_proxies "$HLTV" +sys_ticrate "$TICRATE" $client_args $EXTRA_ARGS ${BENCH_SERVER_ARGS:-} +map "$MAP" \
-	< "$fifo" > "$out/server.log" 2>&1 &
+server_args=(-game cstrike -console -port 27015
+	+sv_lan 1 +maxplayers "$MAXPLAYERS" +sv_proxies "$HLTV" +sys_ticrate "$TICRATE" $client_args $EXTRA_ARGS ${BENCH_SERVER_ARGS:-} +map "$MAP")
+
+# BENCH_RECORD=1: record the session's inputs and sends for tools/bench/replay.sh,
+# which replays them with the same arguments
+record_args=()
+if [ "${BENCH_RECORD:-0}" = 1 ]; then
+	printf '%s\n' "${server_args[@]}" > "$out/server_args.txt"
+	record_args=(-netrecord "$out/session.rec" -netsends "$out/live.sends")
+fi
+
+${BENCH_NO_ASLR:+setarch "$(uname -m)" -R} ./hlds_linux "${record_args[@]}" "${server_args[@]}" < "$fifo" > "$out/server.log" 2>&1 &
 server_pid=$!
 
 exec 3> "$fifo"

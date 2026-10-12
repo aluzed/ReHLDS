@@ -55,7 +55,11 @@ bool CIPRateLimit::LessIP(const iprate_t &lhs, const iprate_t &rhs)
 // Return false if this IP has exceeded limits
 bool CIPRateLimit::CheckIP(netadr_t adr)
 {
+#ifdef REHLDS_FIXES
+	time_t curTime = (time_t)g_NetReplay.Value(CRehldsPlatformHolder::get()->time(nullptr));
+#else
 	time_t curTime = CRehldsPlatformHolder::get()->time(nullptr);
+#endif
 	return CheckIP(adr, curTime, max_queries_sec.value, max_queries_sec_global.value, max_queries_window.value);
 }
 

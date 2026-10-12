@@ -143,6 +143,7 @@
     <ClCompile Include="..\rehlds\frame_profiler.cpp" />
     <ClCompile Include="..\rehlds\frame_scheduler.cpp" />
     <ClCompile Include="..\rehlds\net_receive_thread.cpp" />
+    <ClCompile Include="..\rehlds\net_replay.cpp" />
     <ClCompile Include="..\rehlds\structSizeCheck.cpp" />
     <ClCompile Include="..\testsuite\anonymizer.cpp" />
     <ClCompile Include="..\testsuite\funccalls.cpp" />
@@ -472,6 +473,7 @@
     <ClInclude Include="..\rehlds\frame_profiler.h" />
     <ClInclude Include="..\rehlds\frame_scheduler.h" />
     <ClInclude Include="..\rehlds\net_receive_thread.h" />
+    <ClInclude Include="..\rehlds\net_replay.h" />
     <ClInclude Include="..\rehlds\threading\spsc_ring.h" />
     <ClInclude Include="..\rehlds\monotonic_clock.h" />
     <ClInclude Include="..\testsuite\anonymizer.h" />

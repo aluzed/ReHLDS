@@ -22,6 +22,7 @@ project(engine CXX)
 
 option(DEBUG "Build with debug information." OFF)
 option(USE_STATIC_LIBSTDC "Enables static linking libstdc++." OFF)
+option(REHLDS_HELGRIND "Annotates lock-free code for Helgrind/DRD race checks (tools/bench/race_check.sh)." OFF)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -181,6 +182,7 @@ set(ENGINE_SRCS
 	rehlds/hookchains_impl.cpp
 	rehlds/main.cpp
 	rehlds/net_receive_thread.cpp
+	rehlds/net_replay.cpp
 	rehlds/platform.cpp
 	rehlds/public_amalgamation.cpp
 	rehlds/rehlds_api_impl.cpp
@@ -290,6 +292,10 @@ target_link_libraries(engine PRIVATE
 	bzip2
 	steam_api
 )
+
+if (REHLDS_HELGRIND)
+	target_compile_definitions(engine PRIVATE REHLDS_HELGRIND)
+endif()
 
 if (USE_STATIC_LIBSTDC)
 	target_compile_definitions(engine PRIVATE BUILD_STATIC_LIBSTDC)

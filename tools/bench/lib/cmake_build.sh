@@ -8,5 +8,5 @@ build=$2
 
 mkdir -p "$build"
 cd "$build"
-cmake "$src" -DCMAKE_BUILD_TYPE=Release > cmake.log
+cmake "$src" -DCMAKE_BUILD_TYPE=Release -DREHLDS_HELGRIND="${BENCH_HELGRIND:-OFF}" > cmake.log
 make -j"$(nproc)" > make.log 2>&1 || { tail -40 make.log; exit 1; }

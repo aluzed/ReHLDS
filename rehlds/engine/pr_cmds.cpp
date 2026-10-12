@@ -69,7 +69,11 @@ void EXT_FUNC PF_makevectors_I(const float *rgflVector)
 
 float EXT_FUNC PF_Time(void)
 {
+#ifdef REHLDS_FIXES
+	return (float)g_NetReplay.ValueF(Sys_FloatTime());
+#else
 	return Sys_FloatTime();
+#endif
 }
 
 void EXT_FUNC PF_setorigin_I(edict_t *e, const float *org)
@@ -2478,7 +2482,11 @@ void EXT_FUNC PF_changelevel_I(const char *s1, const char *s2)
 
 void SeedRandomNumberGenerator(void)
 {
+#ifdef REHLDS_FIXES
+	idum = -(int)g_NetReplay.Value(CRehldsPlatformHolder::get()->time(NULL));
+#else
 	idum = -(int)CRehldsPlatformHolder::get()->time(NULL);
+#endif
 	if (idum > 1000)
 	{
 		idum = -idum;

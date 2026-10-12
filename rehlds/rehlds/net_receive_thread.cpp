@@ -116,6 +116,17 @@ CNetReceiveThread::CNetReceiveThread() :
 {
 	for (int i = 0; i < NTD_COUNT; i++)
 		m_Dropped[i].store(0, std::memory_order_relaxed);
+
+	// Statistics are relaxed atomics, read by the main thread for display only
+	RACE_BENIGN(&m_Received, sizeof(m_Received), "statistics");
+	RACE_BENIGN(m_Dropped, sizeof(m_Dropped), "statistics");
+	RACE_BENIGN(&m_BanReplies, sizeof(m_BanReplies), "statistics");
+	RACE_BENIGN(&m_RecvErrors, sizeof(m_RecvErrors), "statistics");
+	RACE_BENIGN(&m_MaxQueueDepth, sizeof(m_MaxQueueDepth), "statistics");
+
+	// Flags: what they guard is synchronised by the config mutex and by pthread_join
+	RACE_BENIGN(&m_ConfigVersion, sizeof(m_ConfigVersion), "flag");
+	RACE_BENIGN(&m_bStopRequested, sizeof(m_bStopRequested), "flag");
 }
 
 CNetReceiveThread::~CNetReceiveThread()
@@ -154,6 +165,10 @@ void CNetReceiveThread::Init()
 	Cmd_AddCommand("net_thread_stats", Cmd_NetThreadStats);
 
 	if (!COM_CheckParm("-netthread"))
+		return;
+
+	// A replay reads its packets from the recording
+	if (g_NetReplay.IsReplaying())
 		return;
 
 #ifdef _WIN32
@@ -207,6 +222,16 @@ void CNetReceiveThread::Start(SOCKET serverSocket, SOCKET serverSocketIpx)
 	BeginFrame();
 
 	m_bStopRequested.store(false);
+
+	// CUtlRBTree's sentinel node is a function-local static shared by every tree of
+	// the same type, initialised on first use under a compiler guard that race
+	// detectors do not understand: initialise it here, before the thread exists.
+	{
+		netadr_t adr;
+		Q_memset(&adr, 0, sizeof(adr));
+		CIPRateLimit warmUp;
+		warmUp.CheckIP(adr, 0, 1.0f, 1.0f, 1.0f);
+	}
 
 #ifdef _WIN32
 	m_hThread = CreateThread(nullptr, 0, ThreadEntry, this, 0, nullptr);

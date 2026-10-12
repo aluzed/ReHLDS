@@ -37,11 +37,27 @@ and `BENCH_SERVER_ARGS`, e.g. `+sys_scheduler 1`, to append arguments to the ser
 | `clients8` | 8 protocol load clients, smoke test of `loadclient.py` |
 | `clients32` | full server: 32 protocol load clients at 100 commands/s and 100 snapshots/s |
 | `flood-a2s` | `clients32` + 50 000 A2S_INFO queries/s from 4096 addresses |
+| `replay` | short session for replay checks: 8 load clients, 2 HLTV proxies, no bots |
 | `flood-junk` | `clients32` + 50 000 junk packets/s from 4096 addresses, shaped like connected-client traffic |
 
 A scenario is a small `.env` file in `scenarios/`: `MAP`, `TICRATE`, `MAXPLAYERS`, `BOTS`,
 `HLTV`, `HLTV_UPDATERATE`, `CLIENTS`, `CLIENT_CMDRATE`, `WARMUP`, `DURATION`, `EXTRA_ARGS`,
 `FLOOD_KIND`, `FLOOD_PPS`, `FLOOD_SOURCES`.
+
+## Replay and race checks (MT-004)
+
+```sh
+tools/bench/regression.sh before after       # same packets as the reference build?
+BENCH_RECORD=1 tools/bench/run.sh replay x   # record a session (any scenario)
+tools/bench/replay.sh .bench/results/<run> y # replay it with build y, compare
+BENCH_HELGRIND=ON tools/bench/build.sh helgrind
+tools/bench/race_check.sh helgrind 90        # Helgrind on the server with the network thread
+```
+
+The `replay` scenario has load clients and HLTV proxies but no bots: sessions with bots
+are not deterministic. `BENCH_NO_ASLR=1` (with `BENCH_DOCKER_ARGS="--security-opt
+seccomp=unconfined"`) runs the server without address randomisation. Details and results:
+[`docs/benchmarks/replay.md`](../../docs/benchmarks/replay.md).
 
 ## Flood generator
 

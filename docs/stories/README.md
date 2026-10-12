@@ -91,8 +91,8 @@ frame on target servers, epic 4 is re-scoped.
 
 ## Status and decision gate (2026-10-12)
 
-Done: MT-002, MT-003, MT-101, MT-103, MT-106, MT-302, MT-303 (Linux); MT-001 except the
-Windows CI run.
+Done: MT-002, MT-003, MT-101, MT-103, MT-106, MT-302, MT-303, MT-004 (Linux, not in CI);
+MT-001 except the Windows CI run.
 
 Measured on a full server (`clients32`, see
 [`../benchmarks/clients32.md`](../benchmarks/clients32.md)): with the scheduler (MT-101)
@@ -135,8 +135,14 @@ from 4096 addresses on the full server ([`../benchmarks/flood.md`](../benchmarks
 The thread also drops netchan packets from addresses that are not connected clients:
 under a junk flood of 50 000 packets/s, the main thread keeps its no-flood numbers.
 
-Next: Windows CI build (all the Windows code paths of MT-002, MT-101, MT-302), then
-MT-004 (byte-exact replay) before any deeper change.
+### Update: regression replay and race checks (MT-004)
+
+Done on Linux ([`../benchmarks/replay.md`](../benchmarks/replay.md)): sessions without bots
+replay byte-identically, a one-byte change in the output is caught, and Helgrind finds
+no race in engine code with the network thread under load. Not in CI yet. Sessions with
+bots are not deterministic (game DLL bot AI).
+
+Next: Windows CI build (all the Windows code paths of MT-002, MT-101, MT-302).
 
 ## Explicit non-goals
 

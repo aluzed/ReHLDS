@@ -1210,9 +1210,24 @@ void NET_FreeMsg(net_messages_t *pmsg)
 	}
 }
 
+#ifdef REHLDS_FIXES
+static qboolean NET_RecordServerPacket(netsrc_t sock, qboolean received)
+{
+	if (sock == NS_SERVER && g_NetReplay.IsRecording())
+		g_NetReplay.RecordPacket(received != FALSE, &net_message, net_from);
+
+	return received;
+}
+#endif
+
 qboolean NET_GetPacket(netsrc_t sock)
 {
 	qboolean bret;
+
+#ifdef REHLDS_FIXES
+	if (sock == NS_SERVER && g_NetReplay.IsReplaying())
+		return g_NetReplay.ReplayPacket(&net_message, &net_from) ? TRUE : FALSE;
+#endif
 
 	NET_AdjustLag();
 	NET_ThreadLock();
@@ -1250,7 +1265,11 @@ qboolean NET_GetPacket(netsrc_t sock)
 		net_message.cursize = in_message.cursize;
 		Q_memcpy(&net_from, &in_from, sizeof(netadr_t));
 		NET_ThreadUnlock();
+#ifdef REHLDS_FIXES
+		return NET_RecordServerPacket(sock, bret);
+#else
 		return bret;
+#endif
 	}
 
 	net_messages_t *pmsg = messages[sock];
@@ -1265,7 +1284,11 @@ qboolean NET_GetPacket(netsrc_t sock)
 		bret = TRUE;
 	}
 	NET_ThreadUnlock();
+#ifdef REHLDS_FIXES
+	return NET_RecordServerPacket(sock, bret);
+#else
 	return bret;
+#endif
 }
 
 void NET_AllocateQueues()
@@ -1386,6 +1409,17 @@ void EXT_FUNC NET_SendPacket_api(unsigned int length, void *data, const netadr_t
 
 void NET_SendPacket(netsrc_t sock, int length, void *data, const netadr_t& to)
 {
+#ifdef REHLDS_FIXES
+	if (sock == NS_SERVER && (g_NetReplay.IsRecording() || g_NetReplay.IsReplaying()))
+	{
+		g_NetReplay.RecordSend(length, data, to);
+
+		// Nobody listens to a replay
+		if (g_NetReplay.IsReplaying())
+			return;
+	}
+#endif
+
 	if (to.type == NA_LOOPBACK)
 	{
 		NET_SendLoopPacket(sock, length, data, to);
