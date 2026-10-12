@@ -37,6 +37,9 @@ plugin hooks, so that enabling `sv_parallel_send` can never crash my server.
       run while the main thread runs game DLL or Metamod code: no crash in 8 map changes
       with Metamod-R, AMX Mod X, bots and playing clients (`tools/bench/mapchange_check.sh`,
       which crashed the engine before the fix at the 2nd).
+* [x] Hookchains, conditional encoders and their engine callbacks checked at run time
+      (`sys_thread_checks`): no report in 8 map changes, reports from the first frames
+      when the encoders are forced to overlap the gather.
 * [ ] Compatibility matrix documented in `docs/` with results.
 * [ ] No crash in a 1-hour `cs32` run with the matrix plugins and `sv_parallel_send 1`.
 
@@ -79,5 +82,26 @@ Done for the guard:
 * Helgrind did not see the race: it runs one thread at a time and the main thread then
   encodes nearly every snapshot itself. `race_check.sh` now loads Metamod and counts the
   reports on threads the engine created, and `mapchange_check.sh` covers this path.
-* Not done: assertions in `callChain`, the "thread-safe hook" API extension, the
-  compatibility matrix and the 1-hour run (field validation, MT-702).
+* Run-time checks (`sys_thread_checks`, `rehlds/rehlds/thread_checks.{h,cpp}`), in
+  release builds, on by default. In the parallel window (`ParallelSend_Begin` to the end
+  of `ParallelSend_Finish`) one thread owns game DLL code: the main thread while it
+  gathers, then, once it has published every snapshot, the thread running a conditional
+  encoder (checked under the encoder lock). Reported: a conditional encoder entered while
+  another thread owns game DLL code, an engine function the encoders call back
+  (`DELTA_SetField*`, `DELTA_UnsetField*`, `DELTA_FindFieldIndex`, `GetCurrentPlayer`)
+  on a worker that does not own it, a hooked ReHLDS hookchain called on a worker
+  (`callChain`). `sys_thread_checks 2` aborts on the first one.
+  Checked both ways with `mapchange_check.sh` (Metamod-R, AMX Mod X, bots, playing
+  clients): the engine of this story with `sys_thread_checks 2` changes the map 8 times
+  without a report; the same engine forced to overlap the gather with the encoders (the
+  bug above) reports from the first frames (23 violations in the first 10 s, 190 000 by
+  the crash at the first map change). Replays byte-identical. Cost: on `clients32-ents`
+  (3 runs each, `sv_parallel_send 1`),
+  snapshot send 48.3 / 230 µs avg / p99 without the checks, 48.7 / 249 µs with them
+  (encode p99 99 / 113 µs); frame, tick interval and CPU unchanged. The p99 difference
+  shows in every run (233, 234, 223 against 255, 249, 244 µs).
+  Limits: the main thread's game DLL calls are not checked one by one (the whole gather
+  counts as game DLL code), and the engine functions the encoders do not use are not
+  checked on the workers.
+* Not done: the "thread-safe hook" API extension, the compatibility matrix and the
+  1-hour run (field validation, MT-702).

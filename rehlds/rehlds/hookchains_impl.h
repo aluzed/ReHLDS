@@ -30,6 +30,9 @@
 
 const int MAX_HOOKS_IN_CHAIN = 19;
 
+// Subscribers (plugins) run on the main thread only, see thread_checks.h
+void ThreadChecks_HookChainCalled();
+
 // Implementation for chains in modules
 template<typename t_ret, typename ...t_args>
 class IHookChainImpl : public IHookChain<t_ret, t_args...> {
@@ -126,6 +129,9 @@ public:
 	virtual ~IHookChainRegistryImpl() { }
 
 	t_ret callChain(origfunc_t origFunc, t_args... args) {
+		if (m_NumHooks)
+			ThreadChecks_HookChainCalled();
+
 		IHookChainImpl<t_ret, t_args...> chain(m_Hooks, origFunc);
 		return chain.callNext(args...);
 	}
@@ -152,6 +158,9 @@ public:
 	virtual ~IVoidHookChainRegistryImpl() { }
 
 	void callChain(origfunc_t origFunc, t_args... args) {
+		if (m_NumHooks)
+			ThreadChecks_HookChainCalled();
+
 		IVoidHookChainImpl<t_args...> chain(m_Hooks, origFunc);
 		chain.callNext(args...);
 	}

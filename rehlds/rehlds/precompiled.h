@@ -57,6 +57,7 @@
 #include "net_receive_thread.h"
 #include "threading/worker_pool.h"
 #include "parallel_send.h"
+#include "thread_checks.h"
 #include "net_replay.h"
 
 #include "dlls/cdll_dll.h"

@@ -147,12 +147,14 @@ namespace
 			(!reason && !g_RehldsHookchains.m_SV_EmitPings.isEmpty()) ? ", except those with pings (a plugin hooks SV_EmitPings)" : "");
 		Con_Printf("  snapshots encoded by the workers %llu, by the main thread %llu\n",
 			(unsigned long long)s_TotalOnWorkers, (unsigned long long)s_TotalOnMainThread);
+		Con_Printf("  sys_thread_checks %s, %u violations\n", sys_thread_checks.string, ThreadChecks_Violations());
 	}
 }
 
 void ParallelSend_Init()
 {
 	Cmd_AddCommand("sv_parallel_send_stats", Cmd_ParallelSendStats);
+	ThreadChecks_Init();
 	RACE_BENIGN(&s_EncodedOnWorkers, sizeof(s_EncodedOnWorkers), "statistics");
 	Cvar_RegisterVariable(&sys_threads_spin_us);
 
@@ -200,6 +202,7 @@ bool ParallelSend_Begin(client_snapshot_t *snapshots)
 	s_bOverlapGather = !HasConditionalEncoders();
 	s_bActive = true;
 	DELTAJit_SerialiseConditionalEncoders(true);
+	ThreadChecks_BeginWindow();
 
 	// Wakes the workers now, so that they are running when the snapshots are published:
 	// as they are gathered, or else all of them in ParallelSend_Finish
@@ -220,10 +223,15 @@ void ParallelSend_Finish()
 		return;
 
 	if (!s_bOverlapGather)
+	{
+		// Every snapshot is gathered: the conditional encoders can run on the workers
+		ThreadChecks_ReleaseMainThread();
 		s_Workers.Publish(s_NumSnapshots);
+	}
 
 	s_Workers.Finish();
 	DELTAJit_SerialiseConditionalEncoders(false);
+	ThreadChecks_EndWindow();
 
 	if (s_bPingsOnMainThread)
 	{

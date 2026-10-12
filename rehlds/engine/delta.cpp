@@ -338,6 +338,8 @@ delta_description_t *DELTA_FindField(delta_t *pFields, const char *pszField)
 
 int EXT_FUNC DELTA_FindFieldIndex(struct delta_s *pFields, const char *fieldname)
 {
+	ThreadChecks_EngineCallback(__func__);
+
 	int fieldCount = pFields->fieldCount;
 	delta_description_t *pitem = pFields->pdd;
 
@@ -355,6 +357,8 @@ int EXT_FUNC DELTA_FindFieldIndex(struct delta_s *pFields, const char *fieldname
 
 void EXT_FUNC DELTA_SetField(struct delta_s *pFields, const char *fieldname)
 {
+	ThreadChecks_EngineCallback(__func__);
+
 #if defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)
 	int index = DELTA_FindFieldIndex(pFields, fieldname);
 
@@ -372,6 +376,8 @@ void EXT_FUNC DELTA_SetField(struct delta_s *pFields, const char *fieldname)
 
 void EXT_FUNC DELTA_UnsetField(struct delta_s *pFields, const char *fieldname)
 {
+	ThreadChecks_EngineCallback(__func__);
+
 #if defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)
 	int index = DELTA_FindFieldIndex(pFields, fieldname);
 
@@ -389,6 +395,8 @@ void EXT_FUNC DELTA_UnsetField(struct delta_s *pFields, const char *fieldname)
 
 void EXT_FUNC DELTA_SetFieldByIndex(struct delta_s *pFields, int fieldNumber)
 {
+	ThreadChecks_EngineCallback(__func__);
+
 #if (defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)) && defined REHLDS_JIT
 	DELTAJit_SetFieldByIndex(pFields, fieldNumber);
 #else
@@ -398,6 +406,8 @@ void EXT_FUNC DELTA_SetFieldByIndex(struct delta_s *pFields, int fieldNumber)
 
 void EXT_FUNC DELTA_UnsetFieldByIndex(struct delta_s *pFields, int fieldNumber)
 {
+	ThreadChecks_EngineCallback(__func__);
+
 #if (defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)) && defined REHLDS_JIT
 	DELTAJit_UnsetFieldByIndex(pFields, fieldNumber);
 #else
@@ -578,7 +588,11 @@ void DELTA_MarkSendFields(unsigned char *from, unsigned char *to, delta_t *pFiel
 #endif
 	}
 	if (pFields->conditionalencode)
+	{
+		bool entered = ThreadChecks_EnterGameCode("a game DLL conditional encoder");
 		pFields->conditionalencode(pFields, from, to);
+		ThreadChecks_LeaveGameCode(entered);
+	}
 }
 
 void DELTA_SetSendFlagBits(delta_t *pFields, int *bits, int *bytecount)

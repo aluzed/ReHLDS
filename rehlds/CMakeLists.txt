@@ -190,6 +190,7 @@ set(ENGINE_SRCS
 	rehlds/rehlds_interfaces_impl.cpp
 	rehlds/rehlds_messagemngr_impl.cpp
 	rehlds/rehlds_security.cpp
+	rehlds/thread_checks.cpp
 	rehlds/thread_state.cpp
 	rehlds/threading/worker_pool.cpp
 )
@@ -207,6 +208,7 @@ set(UNITTESTS_SRCS
 	unittests/spsc_ring_tests.cpp
 	unittests/struct_offsets_tests.cpp
 	unittests/sys_tests.cpp
+	unittests/thread_checks_tests.cpp
 	unittests/worker_pool_tests.cpp
 	unittests/TestRunner.cpp
 	unittests/tmessage_tests.cpp

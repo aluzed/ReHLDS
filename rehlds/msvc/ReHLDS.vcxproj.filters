@@ -239,6 +239,9 @@
     <ClCompile Include="..\unittests\worker_pool_tests.cpp">
       <Filter>unittests</Filter>
     </ClCompile>
+    <ClCompile Include="..\unittests\thread_checks_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
     <ClCompile Include="..\engine\com_custom.cpp">
       <Filter>engine\common</Filter>
     </ClCompile>
@@ -336,6 +339,9 @@
       <Filter>rehlds</Filter>
     </ClCompile>
     <ClCompile Include="..\rehlds\parallel_send.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\thread_checks.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
     <ClCompile Include="..\rehlds\thread_state.cpp">
@@ -1081,6 +1087,9 @@
     <ClInclude Include="..\rehlds\parallel_send.h">
       <Filter>rehlds</Filter>
     </ClInclude>
+    <ClInclude Include="..\rehlds\thread_checks.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
     <ClInclude Include="..\rehlds\thread_state.h">
       <Filter>rehlds</Filter>
     </ClInclude>
@@ -1130,4 +1139,4 @@
       <Filter>public\rehlds</Filter>
     </ClInclude>
   </ItemGroup>
-</Project>
+</Project>

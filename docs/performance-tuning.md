@@ -23,6 +23,7 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `net_thread_filter` | MT-303 | 1 | 1 | Early filtering on the network thread |
 | `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers with spare cores: 2, 1 (under field validation) | Snapshots encoded on worker threads |
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
+| `sys_thread_checks` | MT-404 | 1 | 1 | Reports game DLL code run on two threads at once |
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
@@ -211,6 +212,14 @@ main thread: with `SV_EmitPings` hooked (scoreboard plugins), the snapshots carr
 pings are encoded by the main thread; with `SV_CreatePacketEntities` or `SV_EmitEvents`
 hooked, all of them. `sv_parallel_send_stats` says which applies; the console also logs
 it when it changes.
+
+`sys_thread_checks 1` (the default) checks those rules while the workers encode: a
+conditional encoder running while another thread runs game DLL code, an engine function
+called back by game DLL code on a worker outside an encoder, or a hooked ReHLDS hookchain
+called on a worker is reported on the console (`WARNING: thread check: ...`, at most once
+every 10 s, with a count) and counted in `sv_parallel_send_stats`. `sys_thread_checks 2`
+aborts the server on the first one, for a core dump. Any report is an engine bug: please
+send it with the plugin list.
 
 ## The machine
 

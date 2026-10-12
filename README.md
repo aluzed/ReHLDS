@@ -114,6 +114,7 @@ This means that plugins that do binary code analysis (Orpheu for example) probab
 <li>sv_profile_frames &lt;1000-600000&gt; // Number of frames the profiler keeps. Takes effect after sv_profile_reset. Default: 60000
 <li>sv_parallel_send &lt;1|0&gt; // Encode the clients' snapshots on the worker threads started with -sys_threads. With game DLL conditional encoders (Counter-Strike), after the main thread gathered them all; otherwise while it gathers the next ones. Snapshots stay byte-identical. Falls back to the main thread for the snapshots a plugin hooks (ReAPI SV_EmitPings: snapshots with pings; SV_CreatePacketEntities, SV_EmitEvents: all). See [performance tuning](docs/performance-tuning.md). Default: 0
 <li>sys_threads_spin_us &lt;0-2000&gt; // How long the worker threads spin for the next frame's snapshots before sleeping. Default: 0
+<li>sys_thread_checks &lt;0-2&gt; // With sv_parallel_send 1, check that game DLL and Metamod code never runs on two threads at once and that no plugin hook runs on an encoding thread. 0: off, 1: report the violations on the console, 2: also abort the server on the first one (core dump). Default: 1
 <li>net_thread_filter &lt;1|0&gt; // With -netthread, drop on the network thread the packets the main thread would ignore: IP-banned addresses (sv_filterban), queries above the rate limits, malformed packets and game packets from addresses that are not connected. Default: 1
 </ul>
 </details>

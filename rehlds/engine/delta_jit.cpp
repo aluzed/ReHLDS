@@ -736,7 +736,9 @@ void DELTAJit_SerialiseConditionalEncoders(bool serialise) {
 
 void DELTAJit_CallConditionalEncoder(delta_t *pFields, const unsigned char *from, const unsigned char *to) {
 	if (!s_bSerialiseEncoders.load(std::memory_order_relaxed)) {
+		bool entered = ThreadChecks_EnterGameCode("a game DLL conditional encoder");
 		pFields->conditionalencode(pFields, from, to);
+		ThreadChecks_LeaveGameCode(entered);
 		return;
 	}
 
@@ -745,7 +747,11 @@ void DELTAJit_CallConditionalEncoder(delta_t *pFields, const unsigned char *from
 	}
 	RACE_HAPPENS_AFTER(&s_EncoderLock);
 
+	// Checked under the lock: the lock serialises the encoders, the check sees whether
+	// the main thread still runs game DLL code
+	bool entered = ThreadChecks_EnterGameCode("a game DLL conditional encoder");
 	pFields->conditionalencode(pFields, from, to);
+	ThreadChecks_LeaveGameCode(entered);
 
 	RACE_HAPPENS_BEFORE(&s_EncoderLock);
 	s_EncoderLock.clear(std::memory_order_release);

@@ -2737,6 +2737,8 @@ void EXT_FUNC PF_SetPhysicsKeyValue(const edict_t *pClient, const char *key, con
 
 int EXT_FUNC PF_GetCurrentPlayer(void)
 {
+	ThreadChecks_EngineCallback(__func__);
+
 	// While a snapshot is encoded (possibly on a worker thread): its client
 	client_t *client = ThreadState()->encodingClient;
 	int idx = (client ? client : host_client) - g_psvs.clients;

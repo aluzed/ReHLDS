@@ -145,6 +145,7 @@
     <ClCompile Include="..\rehlds\net_receive_thread.cpp" />
     <ClCompile Include="..\rehlds\net_replay.cpp" />
     <ClCompile Include="..\rehlds\parallel_send.cpp" />
+    <ClCompile Include="..\rehlds\thread_checks.cpp" />
     <ClCompile Include="..\rehlds\thread_state.cpp" />
     <ClCompile Include="..\rehlds\threading\worker_pool.cpp" />
     <ClCompile Include="..\rehlds\structSizeCheck.cpp" />
@@ -215,6 +216,12 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\unittests\worker_pool_tests.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\unittests\thread_checks_tests.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
@@ -485,6 +492,7 @@
     <ClInclude Include="..\rehlds\net_replay.h" />
     <ClInclude Include="..\rehlds\threading\spsc_ring.h" />
     <ClInclude Include="..\rehlds\parallel_send.h" />
+    <ClInclude Include="..\rehlds\thread_checks.h" />
     <ClInclude Include="..\rehlds\thread_state.h" />
     <ClInclude Include="..\rehlds\threading\worker_pool.h" />
     <ClInclude Include="..\rehlds\monotonic_clock.h" />
@@ -830,4 +838,4 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
-</Project>
+</Project>
