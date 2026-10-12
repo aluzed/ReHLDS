@@ -48,6 +48,7 @@ plugin error, no player complaint specific to the session.
 | Date | Engine | Features | Players | Duration | Ticks/s | Frame p99 | Crashes | Notes |
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-12 | `6405e18` | on | 1 + bots | ≈ 20 min | 1000.0 | 56 µs (bots only, last minute) | 0 | First player: "ultra smooth". |
+| 2026-10-12 | `6405e18` | on | 1 + 10 bots, CSDM FFA | ≈ 35 min | – | – (no capture) | 0 | 227 kills; no timeout, all disconnects client-initiated. |
 
 ## Findings
 
@@ -59,3 +60,9 @@ plugin error, no player complaint specific to the session.
   sizes the buffer for the whole capture.
 * Bots-only server, features on: 1000.0 ticks/s, 12 µs tick jitter, 1 % busy, frame p99
   56 µs; the longest frame (2.4 ms) is in `Steam_RunFrame`.
+* Over the first day (2 h 45 of uptime, 1 player, 10 bots, 10 map changes including
+  `changelevel` by RCON, CSDM loaded at runtime): no crash, no restart, no AMX Mod X
+  error, no client timeout (every disconnect is "Client sent 'drop'"), no packet dropped
+  by the network thread (queue at most 58 of 1024 packets).
+* Still missing for the go/no-go: a frame profile with several players, and the
+  comparison session with the features off.
