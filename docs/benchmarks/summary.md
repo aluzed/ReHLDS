@@ -8,6 +8,9 @@ default). "After" is the fork with the recommended settings:
 -netthread +sys_ticrate 1000 +sys_scheduler 1 +sv_rehlds_snapshot_spread 1
 ```
 
+The encoding threads (`-sys_threads 2 +sv_parallel_send 1`) are under field validation
+and are not in the "After" columns.
+
 Same machine for every run: Ryzen 9 3950X, Linux 7.0, `powersave` governor, no CPU
 pinning, server at `sys_ticrate 1000`. "Cores" are CPU time in fractions of one core:
 100 % = one core fully busy. Details and methods in the linked reports.
@@ -66,7 +69,7 @@ average half that interval for the server's answer to a command. The frame p99 i
 DLL time (player movement, `AddToFullPack`), which runs on the main thread by design;
 `sys_wake_on_packet 1` takes the player movement out of the tick (frame p99 385 µs,
 tick interval p99 1144 µs, see [`../performance-tuning.md`](../performance-tuning.md)).
-The encoding threads (`sv_parallel_send`) gain next to nothing here.
+On this benchmark the encoding threads (`sv_parallel_send`) gain little; their value under a real busy server is measured in the field validation (MT-702).
 
 These numbers replace earlier ones measured with a load client that did not acknowledge
 the server's split snapshots: the server then sent much bigger snapshots than to real

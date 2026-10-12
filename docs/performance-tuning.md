@@ -21,7 +21,7 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `-netthread` | MT-302 | off | on | Network thread, the tick no longer sees floods |
 | `-netthread_queue` | MT-302 | 1024 | 1024 | Queue between the network thread and the game loop |
 | `net_thread_filter` | MT-303 | 1 | 1 | Early filtering on the network thread |
-| `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | 0, 0 | Snapshots encoded on worker threads, see below |
+| `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers with spare cores: 2, 1 (under field validation) | Snapshots encoded on worker threads |
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler |
@@ -160,12 +160,10 @@ interval (5 ms at 100 snapshots/s) for the server's answer. What it does is take
 client commands, which run the game DLL's player movement, out of the tick: on the heavy
 benchmark the frame p99 drops from 1186 to 385 µs and the tick interval p99 from 1249 to
 1144 µs, for about 3 % of a core
-([`stories/MT-102-wake-on-packet.md`](stories/MT-102-wake-on-packet.md)). Worth trying on
-a server whose ticks run late because of player movement; nothing to gain otherwise.
+([`stories/MT-102-wake-on-packet.md`](stories/MT-102-wake-on-packet.md)). To be validated
+under real load (MT-702), on a server whose ticks run late because of player movement.
 
 ## Many players and entities: parallel snapshot encoding
-
-**Not recommended for Counter-Strike: it costs CPU and gains next to nothing.**
 
 Each snapshot is built in two parts: the game DLL decides what each client sees
 (`AddToFullPack`, the gather), then the engine delta-encodes it (the encode).
@@ -193,11 +191,12 @@ averages of three runs ([`benchmarks/clients32-ents.md`](benchmarks/clients32-en
 | Tick interval p99 | 1245 µs | 1255 µs |
 | Process CPU | 23.3 % | 30.7 % |
 
-Real clients acknowledge the snapshots, and the engine encodes each one as a delta from
-the last one they received: the encoding is small, even with many entities. Earlier
-measurements with a load client that did not acknowledge them properly showed a gain
-four times larger, on snapshots that real clients never cause. It may help a mod whose
-snapshots really are big and change a lot every tick; measure before using it.
+On this benchmark the gain is small: the clients acknowledge the snapshots and the engine
+encodes deltas. Earlier measurements with a load client that did not acknowledge them
+properly showed a gain four times larger. The benchmark does not reproduce a real busy
+server (20 players or more, grenades and smokes everywhere, bursts of events): whether it
+pays off there is decided by the field validation (MT-702), with `sv_parallel_send` on and
+off under the same load.
 
 * Two workers are enough: with snapshot spreading, a frame has 2–3 snapshots. A third
   one only adds CPU. `-sys_threads auto` starts one per CPU but one, up to 8, which is

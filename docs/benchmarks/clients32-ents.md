@@ -43,7 +43,8 @@ With the load client fixed (three runs each, `-netthread +sys_scheduler 1
 * The snapshots exceed `sv_maxrate 100000`: each client gets about 12 per second, and
   waits on average half that interval for the answer to a command.
 * The send costs 49 µs per frame: the encoding threads save 2 µs on average and 50 µs at
-  p99 for 7 % of a core. Not worth it.
+  p99 for 7 % of a core, on this benchmark. A real busy server (many players, grenades,
+  smokes) is the field validation's to measure (MT-702).
 * The frame p99 is player movement (`SV_ExecuteClientMessage`), which
   `sys_wake_on_packet 1` runs between the ticks (MT-102).
 

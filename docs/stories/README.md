@@ -164,9 +164,10 @@ snapshots are gathered.
 That benchmark was wrong: the load client mishandled the server's split datagrams and
 acknowledged stale frames, so the server sent much bigger snapshots than to real
 clients (found with MT-102). With the load client fixed, the send takes 49 µs per frame
-(285 µs p99) and the encoding threads save 2 µs on average, 50 µs at p99, for 7 % of a
-core: the first conclusion stands, parallel encoding does not pay off for
-Counter-Strike. The option stays, off by default and out of the recommended settings.
+(285 µs p99) on that benchmark and the encoding threads save 2 µs on average, 50 µs at
+p99, for 7 % of a core. The benchmark does not reproduce a real busy server (many
+players, grenades and smokes): the decision on parallel encoding waits for the field
+validation (MT-702), with it on and off under the same load.
 What remains above the tick on busy servers is game DLL time (player movement,
 `AddToFullPack`).
 

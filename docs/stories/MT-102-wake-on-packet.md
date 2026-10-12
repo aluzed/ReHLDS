@@ -105,8 +105,9 @@ first server packet that acknowledges it, over every command. Three runs of each
 * [x] No busy loop: CPU at idle unchanged (the wait sleeps until a packet or the tick).
 * [x] Fake lag (`NET_LagPacket`) still works: packets go through `NET_GetPacket` as before.
 
-Not in the recommended settings: it gives headroom inside the tick on busy servers, but
-nothing a player notices.
+Off by default. On the benchmark it gives headroom inside the tick but nothing a player
+notices; whether to recommend it is decided with the field validation (MT-702) under
+real load.
 
 ### Found on the way: split packets in the load client
 
