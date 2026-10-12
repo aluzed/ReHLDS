@@ -10,6 +10,10 @@ connections, map changes, rare timing.
 
 * HLDS `steam_legacy` app 90 (cstrike), ReGameDLL_CS `4a50c42`, Metamod-R 1.3.0.149,
   AMX Mod X 1.9.0.5303 (default plugins, CSX), ReAPI 5.29.0.358.
+* From 2026-10-12: CSDM-ReAPI 1.0.8 in free for all (`mp_freeforall 1`, respawn 0.7 s,
+  `mp_round_infinite 1`), with the classic CSDM spawn files (all maps of the cycle except
+  `as_oilrig`). Constant fighting and respawns: more entities and events per frame than
+  normal rounds. Installed by hand in `.bench/staging/`, not by `server.sh setup`.
 * Public Steam server (`sv_lan 0`, VAC), 20 slots, bots fill up to 10, `sys_ticrate 1000`,
   `sv_maxupdaterate 102`, `sv_maxrate 100000`.
 * Features under validation: `-netthread`, `sys_scheduler 1`,
