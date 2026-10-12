@@ -23,6 +23,10 @@ CLIENT_CMDRATE=100
 WARMUP=20
 DURATION=30
 EXTRA_ARGS=
+# Connectionless flood during the measurement window (tools/bench/flood.py)
+FLOOD_KIND=
+FLOOD_PPS=50000
+FLOOD_SOURCES=1024
 . "$scenario"
 
 cpu_ticks() {
@@ -71,20 +75,30 @@ if [ "$CLIENTS" -gt 0 ]; then
 		--output "$out/clients.json" > /dev/null 2> "$out/loadclient.log" &
 fi
 
+if [ -n "$FLOOD_KIND" ]; then
+	python3 "$(dirname "$0")/../flood.py" --server 127.0.0.1:27015 \
+		--kind "$FLOOD_KIND" --pps "$FLOOD_PPS" --sources "$FLOOD_SOURCES" \
+		--start-at "$(( $(date +%s) + WARMUP ))" --duration "$DURATION" \
+		--output "$out/flood.json" > /dev/null 2> "$out/flood.log" &
+fi
+
 sleep "$WARMUP"
 send status
 
 ticks_start=$(cpu_ticks "$server_pid")
+main_ticks_start=$(cpu_ticks "$server_pid/task/$server_pid")
 time_start=$(date +%s.%N)
 send "sv_profile $DURATION"
 sleep "$DURATION"
 ticks_end=$(cpu_ticks "$server_pid")
+main_ticks_end=$(cpu_ticks "$server_pid/task/$server_pid")
 time_end=$(date +%s.%N)
 
 # Let the profiler finish its capture and print the report
 sleep 2
 send "sv_profile_csv bench_profile.csv"
 send status
+send net_thread_stats
 sleep 2
 send quit
 exec 3>&-
@@ -95,6 +109,7 @@ rm -f "$fifo"
 
 cat > "$out/cpu.txt" <<EOF
 cpu_ticks=$((ticks_end - ticks_start))
+main_thread_cpu_ticks=$((main_ticks_end - main_ticks_start))
 clk_tck=$(getconf CLK_TCK)
 wall_start=$time_start
 wall_end=$time_end

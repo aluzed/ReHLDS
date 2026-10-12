@@ -21,7 +21,8 @@ tools/bench/report.py .bench/results/<mychange run> --baseline .bench/results/<b
 
 `run.sh` prints a Markdown report and keeps everything in
 `.bench/results/<date>-<scenario>-<engine>/`: `report.md`, `profile.csv` (one row per
-frame), `server.log`, `hltv-*.log`, `cpu.txt`, `meta.txt`.
+frame), `server.log`, `hltv-*.log`, `cpu.txt` (process and main thread), `meta.txt`, and
+`clients.json` / `flood.json` when the scenario has load clients or a flood.
 
 Set `BENCH_DOCKER_ARGS`, e.g. `--cpuset-cpus=6,7`, to pass extra options to `docker run`,
 and `BENCH_SERVER_ARGS`, e.g. `+sys_scheduler 1`, to append arguments to the server command line.
@@ -35,9 +36,27 @@ and `BENCH_SERVER_ARGS`, e.g. `+sys_scheduler 1`, to append arguments to the ser
 | `bots20-hltv8` | 20 bots + 8 HLTV proxies receiving snapshots (send path) |
 | `clients8` | 8 protocol load clients, smoke test of `loadclient.py` |
 | `clients32` | full server: 32 protocol load clients at 100 commands/s and 100 snapshots/s |
+| `flood-a2s` | `clients32` + 50 000 A2S_INFO queries/s from 4096 addresses |
+| `flood-junk` | `clients32` + 50 000 junk packets/s from 4096 addresses, shaped like connected-client traffic |
 
 A scenario is a small `.env` file in `scenarios/`: `MAP`, `TICRATE`, `MAXPLAYERS`, `BOTS`,
-`HLTV`, `HLTV_UPDATERATE`, `CLIENTS`, `CLIENT_CMDRATE`, `WARMUP`, `DURATION`, `EXTRA_ARGS`.
+`HLTV`, `HLTV_UPDATERATE`, `CLIENTS`, `CLIENT_CMDRATE`, `WARMUP`, `DURATION`, `EXTRA_ARGS`,
+`FLOOD_KIND`, `FLOOD_PPS`, `FLOOD_SOURCES`.
+
+## Flood generator
+
+`flood.py` sends connectionless packets (`a2s` queries, `challenge` requests) or `junk`
+during the measurement window, from many source addresses (127.2.x.y: the whole
+127.0.0.0/8 range is local on Linux), so that per-address rate limits alone do not stop
+it. One process sends up to about 100 000 packets/s. Server replies are counted in
+`flood.json`.
+
+Compare the network thread with the synchronous path:
+
+```sh
+BENCH_SERVER_ARGS="+sys_scheduler 1 +sv_rehlds_snapshot_spread 1" tools/bench/run.sh flood-a2s mybuild
+BENCH_SERVER_ARGS="-netthread +sys_scheduler 1 +sv_rehlds_snapshot_spread 1" tools/bench/run.sh flood-a2s mybuild
+```
 
 ## Protocol load client
 

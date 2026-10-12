@@ -180,6 +180,7 @@ set(ENGINE_SRCS
 	rehlds/FlightRecorderImpl.cpp
 	rehlds/hookchains_impl.cpp
 	rehlds/main.cpp
+	rehlds/net_receive_thread.cpp
 	rehlds/platform.cpp
 	rehlds/public_amalgamation.cpp
 	rehlds/rehlds_api_impl.cpp
@@ -198,6 +199,7 @@ set(UNITTESTS_SRCS
 	unittests/rehlds_tests_shared.cpp
 	unittests/rehlds_tests_shared.h
 	unittests/security_tests.cpp
+	unittests/spsc_ring_tests.cpp
 	unittests/struct_offsets_tests.cpp
 	unittests/sys_tests.cpp
 	unittests/TestRunner.cpp
@@ -283,6 +285,7 @@ target_link_libraries(engine PRIVATE
 	dl
 	rt
 	m
+	pthread
 	aelf32
 	bzip2
 	steam_api

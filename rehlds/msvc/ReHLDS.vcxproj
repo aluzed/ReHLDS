@@ -142,6 +142,7 @@
     <ClCompile Include="..\rehlds\rehlds_security.cpp" />
     <ClCompile Include="..\rehlds\frame_profiler.cpp" />
     <ClCompile Include="..\rehlds\frame_scheduler.cpp" />
+    <ClCompile Include="..\rehlds\net_receive_thread.cpp" />
     <ClCompile Include="..\rehlds\structSizeCheck.cpp" />
     <ClCompile Include="..\testsuite\anonymizer.cpp" />
     <ClCompile Include="..\testsuite\funccalls.cpp" />
@@ -198,6 +199,12 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\unittests\struct_offsets_tests.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\unittests\spsc_ring_tests.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
@@ -464,6 +471,8 @@
     <ClInclude Include="..\rehlds\rehlds_security.h" />
     <ClInclude Include="..\rehlds\frame_profiler.h" />
     <ClInclude Include="..\rehlds\frame_scheduler.h" />
+    <ClInclude Include="..\rehlds\net_receive_thread.h" />
+    <ClInclude Include="..\rehlds\threading\spsc_ring.h" />
     <ClInclude Include="..\rehlds\monotonic_clock.h" />
     <ClInclude Include="..\testsuite\anonymizer.h" />
     <ClInclude Include="..\testsuite\funccalls.h" />

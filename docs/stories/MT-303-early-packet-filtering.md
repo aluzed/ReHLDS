@@ -35,11 +35,43 @@ game loop, so that floods cannot lower the server tick rate.
 
 ## Acceptance criteria
 
-* [ ] `flood` scenario: main thread `SV_ReadPackets` time and tick jitter stay within
-      10 % of the no-flood `cs32` numbers.
-* [ ] `addip` / `removeip` take effect within one frame.
+* [x] `flood` scenario: main thread `SV_ReadPackets` time and tick jitter stay within
+      10 % of the no-flood numbers — `flood-a2s` with the thread: `read_packets` 15 µs
+      avg (20 µs without flood), jitter 15.4 µs (17.3 µs).
+* [x] `addip` / `removeip` take effect within one frame — checked: the first query after
+      `addip` gets the ban reply, the first one after `removeip` is answered.
 * [ ] With a ReAPI plugin hooking `PreprocessPacket`, the plugin still sees every packet
-      it saw before (except malformed ones).
+      it saw before (except malformed and banned ones) — implemented (rate limits stay on
+      the main thread when either hook is registered), not tested with a plugin.
+
+## Status
+
+Done (`rehlds/rehlds/net_receive_thread.cpp`), cvar `net_thread_filter` (default 1).
+
+* Always dropped, like the synchronous path: oversized packets and split packets.
+* With `net_thread_filter 1`: packets shorter than 4 bytes; for connectionless packets,
+  in the order of `SV_ReadPackets`, the IP rate limits (`max_queries_*`, own
+  `CIPRateLimit` instance, skipped when a plugin hooks `PreprocessPacket` or
+  `SV_CheckConnectionLessRateLimits`) and the IP filters (`sv_filterban` semantics).
+  Banned addresses get the same "You have been banned" reply as `SV_SendBan`, sent from
+  the thread, at most 20 per second.
+* The main thread publishes the filters and limits at the start of `SV_ReadPackets` when
+  they changed (`ipfilters_version` bumped by `addip` / `removeip`, cvars, hook
+  registration): an immutable snapshot swapped under a mutex, taken by the thread when
+  the version changes. Ban expiry is converted to a monotonic deadline.
+* Counters per drop reason in `net_thread_stats`.
+* `CIPRateLimit::CheckIP` takes the time and limits as parameters for the thread, and
+  trims its tree at most once per second (`REHLDS_FIXES`): trimming on every packet
+  made an A2S flood from more than 512 addresses take the stock engine down to 45 FPS.
+
+Not done:
+
+* Connected-client traffic is not filtered: a junk flood shaped like netchan packets
+  still costs the main thread +15 % per frame (`flood-junk`). Follow-up: publish the
+  client address list and drop packets from unknown addresses on the thread.
+* `sv_logblocks` messages are not printed for packets the thread rate limits.
+
+Results: [`../benchmarks/flood.md`](../benchmarks/flood.md).
 
 ## Risks
 

@@ -91,7 +91,8 @@ frame on target servers, epic 4 is re-scoped.
 
 ## Status and decision gate (2026-10-12)
 
-Done: MT-002, MT-003, MT-101, MT-103, MT-106; MT-001 except the Windows CI run.
+Done: MT-002, MT-003, MT-101, MT-103, MT-106, MT-302, MT-303 (Linux); MT-001 except the
+Windows CI run.
 
 Measured on a full server (`clients32`, see
 [`../benchmarks/clients32.md`](../benchmarks/clients32.md)): with the scheduler (MT-101)
@@ -118,6 +119,23 @@ Consequences for the plan:
   frames; they are outside the engine's reach. Stability work is better spent on the
   network thread with early filtering (MT-302/MT-303), which protects the tick against
   packet floods, and on Windows parity (CI).
+
+### Update: network thread (MT-302, MT-303)
+
+Done on Linux (Windows code written, not built yet). Under a 50 000 queries/s A2S flood
+from 4096 addresses on the full server ([`../benchmarks/flood.md`](../benchmarks/flood.md)):
+
+* the stock engine fell to **45 FPS and 15 snapshots/s per player**, because of the IP
+  rate limiter walking its whole tree on every packet; fixed (`REHLDS_FIXES`);
+* with the fix only, the main thread keeps 1000 FPS but spends twice as much time per
+  frame on the flood;
+* with `-netthread`, the main thread's frame times and CPU are those of the no-flood
+  run; the thread drops the flood for about 23 % of a core.
+
+Next: Windows CI build (all the Windows code paths of MT-002, MT-101, MT-302), then
+MT-004 (byte-exact replay) before any deeper change. Possible follow-up: drop packets
+from unknown addresses on the network thread (junk flood still costs the main thread
++15 % per frame).
 
 ## Explicit non-goals
 

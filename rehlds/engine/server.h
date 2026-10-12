@@ -422,6 +422,7 @@ extern char localmodels[MAX_MODELS][5];
 
 extern ipfilter_t ipfilters[MAX_IPFILTERS];
 extern int numipfilters;
+extern int ipfilters_version;
 extern userfilter_t userfilters[MAX_USERFILTERS];
 extern int numuserfilters;
 

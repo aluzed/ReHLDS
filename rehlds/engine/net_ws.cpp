@@ -1220,6 +1220,16 @@ qboolean NET_GetPacket(netsrc_t sock)
 	{
 		bret = NET_LagPacket(TRUE, sock, &in_from, &in_message);
 	}
+#ifdef REHLDS_FIXES
+	else if (sock == NS_SERVER && g_NetReceiveThread.IsRunning())
+	{
+		// Same as NET_QueuePacket, with the packet already received and checked by the thread
+		if (g_NetReceiveThread.Pop(&in_message, &in_from))
+			bret = NET_LagPacket(TRUE, sock, &in_from, &in_message);
+		else
+			bret = NET_LagPacket(FALSE, sock, NULL, NULL);
+	}
+#endif
 	else
 	{
 		if (!use_thread)
@@ -1892,9 +1902,22 @@ void NET_Config(qboolean multiplayer)
 			bFirst = FALSE;
 			NET_GetLocalAddress();
 		}
+
+#ifdef REHLDS_FIXES
+#ifdef _WIN32
+		g_NetReceiveThread.Start(ip_sockets[NS_SERVER], ipx_sockets[NS_SERVER]);
+#else
+		g_NetReceiveThread.Start(ip_sockets[NS_SERVER], INV_SOCK);
+#endif
+#endif
 	}
 	else
 	{
+#ifdef REHLDS_FIXES
+		// The thread must not wait on sockets that are being closed
+		g_NetReceiveThread.Stop();
+#endif
+
 		NET_ThreadLock();
 
 		for (int sock = 0; sock < NS_MAX; sock++)
@@ -1981,8 +2004,13 @@ void NET_Init()
 	Cvar_RegisterVariable(&net_scale);
 	Cvar_RegisterVariable(&net_graphpos);
 
+#ifdef REHLDS_FIXES
+	// -netthread starts the cross-platform receive thread (net_receive_thread.cpp)
+	NetReceiveThread_Init();
+#else
 	if (COM_CheckParm("-netthread"))
 		use_thread = TRUE;
+#endif
 
 	if (COM_CheckParm("-netsleep"))
 		net_sleepforever = 0;

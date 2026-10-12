@@ -37,6 +37,8 @@ enum FrameProfilerCounter
 	FPC_BYTES_OUT,
 	FPC_CLIENTS_SENT,         // clients that received a snapshot
 	FPC_ENTITIES_SENT,        // packet entities, summed over clients
+	FPC_NET_THREAD_DROPS,     // packets dropped by the network thread (-netthread)
+	FPC_NET_QUEUE_WAIT_US,    // time spent in the network thread's queue, summed over packets
 
 	FPC_COUNT
 };

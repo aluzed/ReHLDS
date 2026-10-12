@@ -40,12 +40,47 @@ so that bursts and long frames do not cause packet loss or extra latency.
 
 ## Acceptance criteria
 
-* [ ] Same replay results with net thread on/off (MT-004).
-* [ ] Under the `flood` scenario (MT-003), legitimate clients see no increase in packet
-      loss and the main frame time does not include receive syscalls.
-* [ ] `stats`/new counters show ring overflows and drops.
-* [ ] Clean start/stop on `map`, `restart`, `quit`; sockets re-created on `ip`/`port`
-      change without races.
+* [ ] Same replay results with net thread on/off (MT-004) — not available yet; the
+      functional checks below give the same results on both paths.
+* [x] Under the `flood-a2s` scenario, legitimate clients see no increase in packet
+      loss and the main frame time does not include receive syscalls — main thread frame
+      times and CPU equal to the no-flood run, no queue or socket drop, 99.8 snapshots/s.
+* [x] Counters show queue overflows and drops — `net_thread_stats`, and
+      `net_thread_drops` / `net_queue_wait_us` in `sv_profile`.
+* [x] Clean start/stop on `map`, `restart`, `quit` — checked; the thread is stopped
+      before `NET_Config` closes the sockets and started after it opens them.
+
+## Status
+
+Done on Linux; the Windows code is written but has not been built (no CI yet).
+
+* `rehlds/rehlds/net_receive_thread.{h,cpp}`: `CNetReceiveThread`, started with
+  `-netthread` (`-netthread_queue N`, default 1024 packets, 64–16384). Waits with `poll`
+  (`select` on Windows, 50 ms timeout to see the stop request), drains the server socket
+  (IP, plus IPX on Windows) into an `SpscRing` of preallocated slots, stamps the arrival
+  time. Native threads (`pthread_create` / `CreateThread`): the engine is built without
+  exceptions, so `std::thread` cannot report a failed creation.
+* `rehlds/rehlds/threading/spsc_ring.h`: bounded lock-free single-producer
+  single-consumer queue, filled in place (from MT-202), with unit tests.
+* `NET_GetPacket(NS_SERVER)` pops from the queue and goes through `NET_LagPacket` like
+  `NET_QueuePacket`; loopback packets keep priority; other sockets stay synchronous.
+* Under `REHLDS_FIXES`, `-netthread` no longer enables the old implementation (Windows
+  only, a linked list walked to its tail, `TerminateThread` on stop; on Linux it stopped
+  the server from reading packets at all). The old code stays under `#ifndef REHLDS_FIXES`.
+* Disabled when the Windows testsuite records or replays.
+* The release engine now links `pthread` and needs `GLIBCXX_3.4.11` (from `std::mutex`)
+  and `GLIBC_2.12` (`pthread_setname_np`); HLDS ships `GLIBCXX_3.4.16`.
+  `std::make_shared` is avoided: it needs `GLIBCXX_3.4.26`.
+
+Not done:
+
+* Wake-up of the main thread on packet arrival (MT-102): packets are processed on the
+  next tick, as before.
+* `recvmmsg` batching (MT-105): the thread spends about 4.6 µs per packet, 23 % of a core
+  at 50 000 packets/s.
+* TSan run: TSan does not support i386; it needs a 64-bit unit test build (MT-004).
+
+Results: [`../benchmarks/flood.md`](../benchmarks/flood.md).
 
 ## Risks
 

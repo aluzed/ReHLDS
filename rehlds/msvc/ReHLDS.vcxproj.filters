@@ -233,6 +233,9 @@
     <ClCompile Include="..\unittests\sys_tests.cpp">
       <Filter>unittests</Filter>
     </ClCompile>
+    <ClCompile Include="..\unittests\spsc_ring_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
     <ClCompile Include="..\engine\com_custom.cpp">
       <Filter>engine\common</Filter>
     </ClCompile>
@@ -321,6 +324,9 @@
       <Filter>rehlds</Filter>
     </ClCompile>
     <ClCompile Include="..\rehlds\frame_scheduler.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\net_receive_thread.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
     <ClCompile Include="..\engine\sse_mathfun.cpp">
@@ -1046,6 +1052,12 @@
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\frame_scheduler.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\net_receive_thread.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\threading\spsc_ring.h">
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\monotonic_clock.h">

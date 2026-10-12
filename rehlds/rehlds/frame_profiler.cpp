@@ -61,6 +61,8 @@ namespace
 		"bytes_out",
 		"clients_sent",
 		"entities_sent",
+		"net_thread_drops",
+		"net_queue_wait_us",
 	};
 
 	struct ColumnStats

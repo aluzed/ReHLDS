@@ -44,6 +44,8 @@ COUNTERS = [
     "bytes_out",
     "clients_sent",
     "entities_sent",
+    "net_thread_drops",
+    "net_queue_wait_us",
 ]
 
 
@@ -56,6 +58,13 @@ def read_key_values(path):
                     key, value = line.rstrip("\n").split("=", 1)
                     values[key] = value
     return values
+
+
+def read_json(path):
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
 
 
 def read_columns(path):
@@ -94,11 +103,8 @@ class Run:
         self.columns = read_columns(os.path.join(path, "profile.csv"))
         self.stats = {name: stats(values) for name, values in self.columns.items()}
         self.frames = len(self.columns["tick_interval_us"])
-        clients_path = os.path.join(path, "clients.json")
-        self.clients = None
-        if os.path.exists(clients_path):
-            with open(clients_path) as f:
-                self.clients = json.load(f)
+        self.clients = read_json(os.path.join(path, "clients.json"))
+        self.flood = read_json(os.path.join(path, "flood.json"))
 
     @property
     def seconds(self):
@@ -110,8 +116,15 @@ class Run:
 
     @property
     def cpu_percent(self):
+        return self.cpu_share("cpu_ticks")
+
+    @property
+    def main_thread_cpu_percent(self):
+        return self.cpu_share("main_thread_cpu_ticks")
+
+    def cpu_share(self, key):
         try:
-            ticks = int(self.cpu["cpu_ticks"])
+            ticks = int(self.cpu[key])
             clk_tck = int(self.cpu["clk_tck"])
             wall = float(self.cpu["wall_end"]) - float(self.cpu["wall_start"])
         except (KeyError, ValueError):
@@ -171,7 +184,19 @@ def main():
     print(f"| Busy (frame / tick) | {cell(busy, base_busy)} % |")
     if cpu is not None:
         print(f"| Process CPU | {cell(cpu, base_cpu)} % of one core |")
+    main_cpu = run.main_thread_cpu_percent
+    if main_cpu is not None:
+        base_main_cpu = base.main_thread_cpu_percent if base else None
+        print(f"| Main thread CPU | {cell(main_cpu, base_main_cpu)} % of one core |")
     print()
+
+    if run.flood:
+        f = run.flood
+        print(f"| Flood | {f['kind']} from {f['sources']} addresses |")
+        print("|---|---|")
+        print(f"| Packets sent | {f['sent_pps']:.0f} /s ({f['sent']} total) |")
+        print(f"| Server replies | {f['replies']} |")
+        print()
 
     if run.clients:
         c = run.clients

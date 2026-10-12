@@ -83,6 +83,7 @@ char localmodels[MAX_MODELS][5];
 
 ipfilter_t ipfilters[MAX_IPFILTERS];
 int numipfilters;
+int ipfilters_version; // changed by addip and removeip, for the network thread's copy of the filters
 userfilter_t userfilters[MAX_USERFILTERS];
 int numuserfilters;
 
@@ -3934,6 +3935,11 @@ bool EXT_FUNC NET_GetPacketPreprocessor(uint8* data, unsigned int len, const net
 
 void SV_ReadPackets(void)
 {
+#ifdef REHLDS_FIXES
+	if (g_NetReceiveThread.IsRunning())
+		g_NetReceiveThread.BeginFrame();
+#endif
+
 	while (NET_GetPacket(NS_SERVER))
 	{
 		g_FrameProfiler.AddCounter(FPC_PACKETS_IN, 1);
@@ -7568,6 +7574,8 @@ void SV_ListId_f(void)
 
 void SV_AddIP_f(void)
 {
+	ipfilters_version++;
+
 	if (Cmd_Argc() != 3)
 	{
 #ifdef REHLDS_FIXES
@@ -7668,6 +7676,8 @@ void SV_AddIP_f(void)
 
 void SV_RemoveIP_f(void)
 {
+	ipfilters_version++;
+
 #ifdef REHLDS_FIXES
 	int argCount = Cmd_Argc();
 	if (argCount != 2 && argCount != 3)

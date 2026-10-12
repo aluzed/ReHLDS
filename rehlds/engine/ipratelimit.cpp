@@ -39,6 +39,7 @@ CIPRateLimit::CIPRateLimit() : m_IPTree(0, START_TREE_SIZE, LessIP)
 {
 	m_iGlobalCount = 0;
 	m_lLastTime = -1;
+	m_lLastTrimTime = -1;
 }
 
 CIPRateLimit::~CIPRateLimit()
@@ -55,14 +56,30 @@ bool CIPRateLimit::LessIP(const iprate_t &lhs, const iprate_t &rhs)
 bool CIPRateLimit::CheckIP(netadr_t adr)
 {
 	time_t curTime = CRehldsPlatformHolder::get()->time(nullptr);
+	return CheckIP(adr, curTime, max_queries_sec.value, max_queries_sec_global.value, max_queries_window.value);
+}
 
+bool CIPRateLimit::CheckIP(netadr_t adr, time_t curTime, float maxQueriesSec, float maxQueriesSecGlobal, float maxQueriesWindow)
+{
 	// check the per ip rate (do this first, so one person dosing doesn't add to the global max rate
 	ip_t clientIP;
 	Q_memcpy(&clientIP, adr.ip, sizeof(ip_t));
 
 	// if we have stored too many items
+#ifdef REHLDS_FIXES
+	// Only entries idle for FLUSH_TIMEOUT seconds can be trimmed, so when there are
+	// none (a query flood from many addresses) the walk below visits the whole tree
+	// for nothing. Doing it on every packet made each query cost tens of
+	// microseconds: once per second gives the same result.
+	if (m_IPTree.Count() > MAX_TREE_SIZE && curTime != m_lLastTrimTime)
+#else
 	if (m_IPTree.Count() > MAX_TREE_SIZE)
+#endif
 	{
+#ifdef REHLDS_FIXES
+		m_lLastTrimTime = curTime;
+#endif
+
 		ip_t tmp = m_IPTree.LastInorder(); // we step BACKWARD's through the tree
 		int i = m_IPTree.FirstInorder();
 
@@ -93,15 +110,15 @@ bool CIPRateLimit::CheckIP(netadr_t adr)
 	{
 		m_IPTree[entry].count++; // a new hit
 
-		if ((curTime - m_IPTree[entry].lastTime) > max_queries_window.value)
+		if ((curTime - m_IPTree[entry].lastTime) > maxQueriesWindow)
 		{
 			m_IPTree[entry].lastTime = curTime;
 			m_IPTree[entry].count = 1;
 		}
 		else
 		{
-			float query_rate = static_cast<float>(m_IPTree[entry].count) / max_queries_window.value; // add one so the bottom is never zero
-			if (query_rate > max_queries_sec.value)
+			float query_rate = static_cast<float>(m_IPTree[entry].count) / maxQueriesWindow; // add one so the bottom is never zero
+			if (query_rate > maxQueriesSec)
 			{
 				return false;
 			}
@@ -120,15 +137,15 @@ bool CIPRateLimit::CheckIP(netadr_t adr)
 	// now check the global rate
 	m_iGlobalCount++;
 
-	if ((curTime - m_lLastTime) > max_queries_window.value)
+	if ((curTime - m_lLastTime) > maxQueriesWindow)
 	{
 		m_lLastTime = curTime;
 		m_iGlobalCount = 1;
 	}
 	else
 	{
-		float query_rate = static_cast<float>(m_iGlobalCount) / max_queries_window.value; // add one so the bottom is never zero
-		if (query_rate > max_queries_sec_global.value)
+		float query_rate = static_cast<float>(m_iGlobalCount) / maxQueriesWindow; // add one so the bottom is never zero
+		if (query_rate > maxQueriesSecGlobal)
 		{
 			return false;
 		}
