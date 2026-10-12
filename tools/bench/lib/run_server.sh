@@ -27,6 +27,13 @@ EXTRA_ARGS=
 FLOOD_KIND=
 FLOOD_PPS=50000
 FLOOD_SOURCES=1024
+# METAMOD=1 loads Metamod-R and AMX Mod X with the benchmark plugins
+METAMOD=0
+# Moving entities spawned around the players (tools/bench/plugins/bench_entities.sma)
+ENTITIES=0
+# CLIENTS_ALIVE=1: the load clients join a team and spawn as players (loadclient.py
+# --play); by default they stay dead, as in the first reports
+CLIENTS_ALIVE=0
 . "$scenario"
 
 cpu_ticks() {
@@ -47,7 +54,12 @@ fifo=$out/console.fifo
 rm -f "$fifo"
 mkfifo "$fifo"
 
-server_args=(-game cstrike -console -port 27015
+dll_args=()
+if [ "$METAMOD" = 1 ]; then
+	dll_args=(-dll addons/metamod/metamod_i386.so)
+fi
+
+server_args=(-game cstrike "${dll_args[@]}" -console -port 27015
 	+sv_lan 1 +maxplayers "$MAXPLAYERS" +sv_proxies "$HLTV" +sys_ticrate "$TICRATE" $client_args $EXTRA_ARGS ${BENCH_SERVER_ARGS:-} +map "$MAP")
 
 # BENCH_RECORD=1: record the session's inputs and sends for tools/bench/replay.sh,
@@ -81,6 +93,7 @@ if [ "$CLIENTS" -gt 0 ]; then
 	python3 "$(dirname "$0")/../loadclient.py" --server 127.0.0.1:27015 \
 		--clients "$CLIENTS" --cmdrate "$CLIENT_CMDRATE" \
 		--measure-at "$(( $(date +%s) + WARMUP ))" --duration "$DURATION" \
+		$([ "$CLIENTS_ALIVE" = 1 ] && echo --play) \
 		--output "$out/clients.json" > /dev/null 2> "$out/loadclient.log" &
 fi
 
@@ -89,6 +102,17 @@ if [ -n "$FLOOD_KIND" ]; then
 		--kind "$FLOOD_KIND" --pps "$FLOOD_PPS" --sources "$FLOOD_SOURCES" \
 		--start-at "$(( $(date +%s) + WARMUP ))" --duration "$DURATION" \
 		--output "$out/flood.json" > /dev/null 2> "$out/flood.log" &
+fi
+
+# Players who join during a round wait for the next one, which never comes
+# without bots: restart the round once the load clients are in the game
+if [ "$CLIENTS" -gt 0 ] && [ "$CLIENTS_ALIVE" = 1 ]; then
+	(sleep 12; echo "sv_restart 1" >&3) &
+fi
+
+if [ "$ENTITIES" -gt 0 ]; then
+	# Spawned once the load clients are in the game, around them
+	(sleep 10; echo "bench_spawn $ENTITIES" >&3) &
 fi
 
 sleep "$WARMUP"

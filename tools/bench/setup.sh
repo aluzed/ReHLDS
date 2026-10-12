@@ -3,7 +3,9 @@
 #   - builds the Docker image (Debian 11 + i386 toolchain, same as CI),
 #   - installs the steam_legacy HLDS (cstrike) with steamcmd,
 #   - builds ReGameDLL_CS from source (provides bots) and installs it,
-#   - generates the navigation mesh for the benchmark maps.
+#   - generates the navigation mesh for the benchmark maps,
+#   - installs Metamod-R and AMX Mod X with the benchmark plugins (tools/bench/plugins),
+#     loaded only by the scenarios that set METAMOD=1 (-dll), never through liblist.gam.
 #
 # Everything goes to $BENCH_DIR (default: <repo>/.bench).
 set -euo pipefail
@@ -63,6 +65,31 @@ for map in de_dust2; do
 		log "generating navigation mesh for $map (takes about a minute)"
 		in_container "$BENCH_ROOT/lib/generate_nav.sh" "$HLDS_DIR" "$map"
 	fi
+done
+
+# Metamod-R and AMX Mod X, with only the benchmark plugins
+game=$HLDS_DIR/cstrike
+downloads=$BENCH_DIR/downloads
+if [ ! -f "$game/addons/metamod/metamod_i386.so" ]; then
+	log "installing Metamod-R $METAMOD_RELEASE and AMX Mod X $AMXX_RELEASE"
+	mkdir -p "$downloads"/{metamod,amxx}
+	gh release download "$METAMOD_RELEASE" -R rehlds/Metamod-R -p 'metamod-bin-*.zip' -D "$downloads/metamod" --clobber
+	gh release download "$AMXX_RELEASE" -R alliedmodders/amxmodx -p '*base-linux.tar.gz' -D "$downloads/amxx" --clobber
+	(cd "$downloads/metamod" && unzip -q -o ./*.zip -d x)
+	mkdir -p "$game/addons/metamod"
+	cp "$downloads/metamod/x/addons/metamod/metamod_i386.so" "$downloads/metamod/x/addons/metamod/config.ini" "$game/addons/metamod/"
+	tar xzf "$downloads"/amxx/*base-linux.tar.gz -C "$game"
+	echo 'linux addons/amxmodx/dlls/amxmodx_mm_i386.so' > "$game/addons/metamod/plugins.ini"
+fi
+
+amxx=$game/addons/amxmodx
+: > "$amxx/configs/plugins.ini"
+for source in "$BENCH_ROOT"/plugins/*.sma; do
+	name=$(basename "$source" .sma)
+	log "compiling $name"
+	in_container bash -c 'cd "$1" && ./amxxpc "$2" -o"$3" > /dev/null' _ \
+		"$amxx/scripting" "$source" "$amxx/plugins/$name.amxx"
+	echo "$name.amxx" >> "$amxx/configs/plugins.ini"
 done
 
 log "setup done in $BENCH_DIR"

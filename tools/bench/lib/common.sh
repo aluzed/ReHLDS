@@ -12,6 +12,12 @@ BENCH_IMAGE=${BENCH_IMAGE:-rehlds-bench:deb11}
 REGAMEDLL_REPO=https://github.com/rehlds/ReGameDLL_CS.git
 REGAMEDLL_COMMIT=${REGAMEDLL_COMMIT:-4a50c42}
 
+# Plugin stack: the field validation server (tools/staging) and the benchmark
+# scenarios that load AMX Mod X plugins
+METAMOD_RELEASE=1.3.0.149
+REAPI_RELEASE=5.29.0.358
+AMXX_RELEASE=1.9.0.5303
+
 HLDS_DIR=$BENCH_DIR/hlds
 STEAM_HOME=$BENCH_DIR/home
 

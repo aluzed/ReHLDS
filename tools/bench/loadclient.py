@@ -39,6 +39,7 @@ CLC_DELTA = 4
 SVC_PRINT = 8
 SVC_SERVERINFO = 11
 
+IN_ATTACK = 1 << 0
 IN_JUMP = 1 << 1
 IN_SCORE = 1 << 15
 
@@ -313,7 +314,7 @@ def parse_serverinfo(buf):
 
 
 class Client:
-    def __init__(self, index, server, cmdrate, stats):
+    def __init__(self, index, server, cmdrate, stats, play=False):
         self.index = index
         self.server = server
         self.cmdrate = cmdrate
@@ -331,6 +332,8 @@ class Client:
         self.last_receive = None
         self.intervals = []
         self.ingame_commands = []
+        self.play = play
+        self.join_at = None
 
     def log(self, message):
         print(f"[client {self.index:02d}] {message}", file=sys.stderr)
@@ -384,8 +387,13 @@ class Client:
             self.set_state("spawn", now)
         elif self.state == "spawn":
             self.stringcmd("sendents")
-            self.stringcmd("jointeam 5")
-            self.stringcmd("joinclass 5")
+            if self.play:
+                # The game DLL only accepts a team once the message of the day
+                # is closed (attack pressed, see build_move)
+                self.join_at = now + 1.0
+            else:
+                self.stringcmd("jointeam 5")
+                self.stringcmd("joinclass 5")
             self.set_state("ingame", now)
             self.stats["ingame"] += 1
             self.log("in game")
@@ -421,6 +429,14 @@ class Client:
         buttons = IN_SCORE if now < self.scoreboard_until else 0
         if random.random() < 0.01:
             buttons |= IN_JUMP
+        if self.join_at is not None:
+            if now < self.join_at:
+                # Close the message of the day: hold attack, release before joining
+                buttons |= IN_ATTACK if now < self.join_at - 0.3 else 0
+            else:
+                self.stringcmd("jointeam 5")
+                self.stringcmd("joinclass 5")
+                self.join_at = None
         cmd = {
             "lerp_msec": 100,
             "msec": int(1000 / self.cmdrate),
@@ -508,12 +524,15 @@ def main():
                         help="wall clock time (epoch seconds) at which measuring starts, instead of --warmup")
     parser.add_argument("--duration", type=float, default=30.0, help="measured seconds")
     parser.add_argument("--output", help="write the JSON summary to this file")
+    parser.add_argument("--play", action="store_true",
+                        help="join a team for real (close the message of the day first), so that "
+                             "the clients spawn as players; without it they stay dead")
     args = parser.parse_args()
 
     host, port = args.server.rsplit(":", 1)
     server = (socket.gethostbyname(host), int(port))
     stats = {"ingame": 0, "failed": 0}
-    clients = [Client(i + 1, server, args.cmdrate, stats) for i in range(args.clients)]
+    clients = [Client(i + 1, server, args.cmdrate, stats, args.play) for i in range(args.clients)]
 
     sel = selectors.DefaultSelector()
     for c in clients:

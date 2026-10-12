@@ -27,10 +27,6 @@ SERVER_DIR=$STAGING_DIR/hlds
 CONTAINER=rehlds-staging
 PORT=27015
 
-METAMOD_RELEASE=1.3.0.149
-REAPI_RELEASE=5.29.0.358
-AMXX_RELEASE=1.9.0.5303
-
 # Opt-in features under validation. FEATURES=0 starts the same build with all of
 # them off (original engine behaviour) for comparison sessions.
 if [ "${FEATURES:-1}" = 0 ]; then

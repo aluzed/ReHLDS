@@ -39,10 +39,14 @@ and `BENCH_SERVER_ARGS`, e.g. `+sys_scheduler 1`, to append arguments to the ser
 | `flood-a2s` | `clients32` + 50 000 A2S_INFO queries/s from 4096 addresses |
 | `replay` | short session for replay checks: 8 load clients, 2 HLTV proxies, no bots |
 | `flood-junk` | `clients32` + 50 000 junk packets/s from 4096 addresses, shaped like connected-client traffic |
+| `clients32-ents` | 32 load clients **playing** (alive, they see each other) + 400 moving entities around them: ≈ 150 packet entities per snapshot (epic 4) |
 
 A scenario is a small `.env` file in `scenarios/`: `MAP`, `TICRATE`, `MAXPLAYERS`, `BOTS`,
 `HLTV`, `HLTV_UPDATERATE`, `CLIENTS`, `CLIENT_CMDRATE`, `WARMUP`, `DURATION`, `EXTRA_ARGS`,
-`FLOOD_KIND`, `FLOOD_PPS`, `FLOOD_SOURCES`.
+`FLOOD_KIND`, `FLOOD_PPS`, `FLOOD_SOURCES`, `CLIENTS_ALIVE` (the load clients join a team
+and spawn; without it they stay dead spectators), `METAMOD` (loads Metamod-R and
+AMX Mod X with the plugins of `plugins/`, compiled by `setup.sh`), `ENTITIES` (moving
+entities spawned by `plugins/bench_entities.sma`, needs `METAMOD=1`).
 
 ## Replay and race checks (MT-004)
 
