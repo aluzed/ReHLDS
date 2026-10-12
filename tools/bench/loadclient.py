@@ -295,6 +295,20 @@ def read_string(buf, pos):
     return buf[pos:end].decode("latin-1"), end + 1
 
 
+def is_print_only(buf):
+    """True for a reliable message made of svc_print only: plugins such as AMX Mod X
+    print to clients during the sign-on, in messages of their own."""
+    pos = 0
+    try:
+        while pos < len(buf):
+            if buf[pos] != SVC_PRINT:
+                return False
+            _, pos = read_string(buf, pos + 1)
+    except ValueError:
+        return False
+    return len(buf) > 0
+
+
 def parse_serverinfo(buf):
     """Finds svc_serverinfo at the start of the 'new' response."""
     pos = 0
@@ -373,7 +387,7 @@ class Client:
             self.last_receive = now
             return
 
-        if completed is None:
+        if completed is None or is_print_only(completed):
             return
 
         if self.state == "new":

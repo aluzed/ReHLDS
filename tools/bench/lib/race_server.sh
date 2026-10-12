@@ -1,6 +1,6 @@
 #!/bin/bash
-# Runs the server under a Valgrind race detector with the network thread, the
-# snapshot worker threads, playing load clients and a small query flood. Runs inside the benchmark container.
+# Runs the server under a Valgrind tool with the network thread, the snapshot
+# worker threads, playing load clients, a small query flood and a map change. Runs inside the benchmark container.
 # usage: race_server.sh <hlds dir> <output dir> <tool> <seconds>
 set -euo pipefail
 
@@ -17,9 +17,16 @@ fifo=$out/console.fifo
 rm -f "$fifo"
 mkfifo "$fifo"
 
-# Valgrind runs the server about 50 times slower: low tick rate, few clients
+# Plugins call the engine back from the encoding threads through Metamod (game DLL
+# conditional encoders): load it when setup.sh installed it
+dll_args=()
+[ -f cstrike/addons/metamod/metamod_i386.so ] && dll_args=(-dll addons/metamod/metamod_i386.so)
+
+# Valgrind runs the server about 50 times slower: low tick rate, few clients. It runs
+# one thread at a time, and the main thread then encodes nearly every snapshot itself:
+# mapchange_check.sh covers the encoding threads calling game DLL and Metamod code
 valgrind --tool="$tool" --log-file="$out/$tool.log" --error-limit=no \
-	./hlds_linux -game cstrike -console -port 27015 +sv_lan 1 +maxplayers 8 -netthread -sys_threads 2 +sv_parallel_send 1 \
+	./hlds_linux -game cstrike "${dll_args[@]}" -console -port 27015 +sv_lan 1 +maxplayers 8 -netthread -sys_threads 2 +sv_parallel_send 1 \
 	+sys_ticrate 100 +mp_consistency 0 +sv_rehlds_maxclients_from_single_ip 8 \
 	+max_queries_sec 1000 +max_queries_sec_global 100000 +map de_dust2 \
 	< "$fifo" > "$out/server.log" 2>&1 &
@@ -53,6 +60,11 @@ send net_thread_stats
 send "removeip 127.2.0.0/24"
 sleep $((secs - 2 * (secs / 3)))
 send net_thread_stats
+send sv_parallel_send_stats
+send status
+# Map change with the threads running and clients connected
+send "changelevel de_dust2"
+sleep 60
 send status
 sleep 3
 send quit

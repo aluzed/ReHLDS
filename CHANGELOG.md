@@ -16,11 +16,12 @@ for the recommended settings and [`docs/stories/`](docs/stories/README.md) for t
 - `sv_rehlds_snapshot_spread`: client snapshots spread evenly over the frames, exact update rate (MT-106).
 - `-netthread`, `-netthread_queue`, `net_thread_filter`, `net_thread_stats`: network receive thread that drops banned, rate-limited, malformed and unknown-address packets before the game loop (MT-302, MT-303).
 - `sv_profile`, `sv_profile_csv`, `sv_profile_reset`, `sv_profile_enable`, `sv_profile_frames`: per-phase frame profiler (MT-002).
-- `-sys_threads`, `sv_parallel_send`, `sys_threads_spin_us`, `sv_parallel_send_stats`: client snapshots encoded on worker threads while the main thread gathers the next ones; byte-identical output, serial fallback for plugin hooks on the encode path (MT-401 to MT-404).
+- `-sys_threads`, `sv_parallel_send`, `sys_threads_spin_us`, `sv_parallel_send_stats`: client snapshots encoded on worker threads; byte-identical output, serial fallback for plugin hooks on the encode path. With game DLL conditional encoders (Counter-Strike), the encoding starts once every snapshot of the frame is gathered (MT-401 to MT-404).
 - `-netrecord`, `-netreplay`, `-netsends`: byte-exact session record and replay for regression checks (MT-004).
-- `tools/bench/`: Docker load tests (bots, protocol clients, HLTV, floods), replay regression and Helgrind race checks; `tools/staging/`: field validation server (MT-003, MT-004, MT-702).
+- `tools/bench/`: Docker load tests (bots, protocol clients, HLTV, floods), replay regression, Helgrind race checks and map change checks with Metamod; `tools/staging/`: field validation server (MT-003, MT-004, MT-702).
 
 ### Fixed
+- `sv_parallel_send 1` with Metamod: the game DLL's conditional encoders ran Metamod's callbacks on the encoding threads while the main thread ran game DLL code, which corrupted the heap; the server crashed at the next map change. Never released (MT-404).
 - The IP rate limiter walked its whole address table on every connectionless packet once it tracked more than 512 addresses: a 50 000 queries/s flood took a full server down to 45 fps. It now trims once per second (MT-303).
 - `host_profile` counted each frame twice (MT-103).
 - `Sys_FloatTime` on Linux: thread-safe start time initialisation (MT-103).

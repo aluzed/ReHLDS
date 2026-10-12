@@ -21,7 +21,7 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `-netthread` | MT-302 | off | on | Network thread, the tick no longer sees floods |
 | `-netthread_queue` | MT-302 | 1024 | 1024 | Queue between the network thread and the game loop |
 | `net_thread_filter` | MT-303 | 1 | 1 | Early filtering on the network thread |
-| `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers: 2, 1 | Snapshots encoded on worker threads |
+| `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers with spare cores: 2, 1 | Snapshots encoded on worker threads |
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
@@ -155,20 +155,32 @@ server with many entities, encoding is the largest part of the send: about 50 µ
 snapshot of 150 entities.
 
 `-sys_threads 2 +sv_parallel_send 1` moves the encoding to two worker threads. The main
-thread still gathers every snapshot, in the same order as before, and each one is
-encoded by a worker while the main thread gathers the next; the main thread then
-transmits the datagrams in client order. The packets are byte-identical to the serial
-ones.
+thread still gathers every snapshot, in the same order as before, the workers and the
+main thread encode them, and the main thread then transmits the datagrams in client
+order. The packets are byte-identical to the serial ones.
 
-Measured with 32 playing clients and 400 moving entities
-([`benchmarks/clients32-ents.md`](benchmarks/clients32-ents.md)):
+With Counter-Strike, the encoding starts once every snapshot of the frame is gathered.
+The game DLL registers conditional encoders (`Entity_Encode`, `Player_Encode`), which run
+during the encoding and call the engine back through the game DLL's engine function
+table. With Metamod, that table points to Metamod's callbacks, which are not
+thread-safe: running them on a worker while the main thread runs game DLL code corrupted
+the heap, and the server crashed at the next map change. The encoders now never run
+while the main thread runs game DLL or Metamod code, and run one at a time. A game DLL
+without conditional encoders keeps the encoding during the gather.
+
+Measured with 32 playing clients and 400 moving entities, Metamod and AMX Mod X loaded,
+averages of three runs ([`benchmarks/clients32-ents.md`](benchmarks/clients32-ents.md)):
 
 | | Serial | 2 workers |
 |---|---|---|
-| `send_messages` avg / p99 | 251 / 790 µs | 152 / 498 µs |
-| Frame avg / p99 | 453 / 1896 µs | 346 / 1673 µs |
-| Main thread CPU | 45.9 % | 35.1 % |
-| Process CPU | 46.4 % | 59.1 % |
+| `send_messages` avg / p99 | 203 / 933 µs | 177 / 670 µs |
+| Frame avg / p99 | 396 / 1701 µs | 374 / 1701 µs |
+| Tick jitter (stddev) | 216 µs | 199 µs |
+| Process CPU | 40.6 % | 69.5 % |
+
+The gain is on the send phase, its peaks most of all; the frame peaks of this benchmark
+are game DLL time (player movement, `AddToFullPack`) and do not change. For about a third
+of a core, it is worth it only with spare cores.
 
 When to use it:
 
@@ -185,7 +197,7 @@ When to use it:
   costs CPU; leave it at 0.
 
 Plugins: the game DLL's own encoders (`Entity_Encode`, `Player_Encode`) run on the
-workers, one at a time. A plugin hooking the encode through ReAPI keeps its hook on the
+workers, one at a time, never while the main thread runs game DLL or plugin code. A plugin hooking the encode through ReAPI keeps its hook on the
 main thread: with `SV_EmitPings` hooked (scoreboard plugins), the snapshots carrying
 pings are encoded by the main thread; with `SV_CreatePacketEntities` or `SV_EmitEvents`
 hooked, all of them. `sv_parallel_send_stats` says which applies; the console also logs

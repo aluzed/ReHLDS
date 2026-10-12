@@ -4,9 +4,12 @@
 usage: race_report.py <log>
 
 A report is the engine's when one of the two conflicting accesses happens in
-engine code (engine_i486.so); those are listed. The others happen inside other
-libraries, in practice the closed-source Steam client racing with its own
-threads, and are only counted. Exit code 1 when a report is the engine's.
+engine code (engine_i486.so), or on a thread the engine created (network and
+snapshot encoding threads): code those threads call into, such as Metamod's
+callbacks run by game DLL conditional encoders, is the engine's concern. Those
+reports are listed. The others happen inside other libraries, in practice the
+closed-source Steam client racing with its own threads, and are only counted.
+Exit code 1 when a report is the engine's.
 """
 
 import collections
@@ -14,6 +17,25 @@ import re
 import sys
 
 ENGINE = "engine_i486.so"
+# Frames of the creation stack of the threads the engine starts
+ENGINE_THREAD_STARTS = ("CWorkerPool::Start", "CNetReceiveThread")
+
+
+def engine_threads(log):
+    """Numbers of the threads created by the engine, from the thread announcements
+    (Helgrind announces the threads of the reports, with their creation stack)."""
+    threads = set()
+    parts = re.split(r"Thread #(\d+) was created", log)
+    for number, stack in zip(parts[1::2], parts[2::2]):
+        stack = re.split(r"\n==\d+== *\n", stack, 1)[0]
+        if any(start in stack for start in ENGINE_THREAD_STARTS):
+            threads.add(number)
+    return threads
+
+
+def access_threads(block):
+    """Thread numbers of the two conflicting accesses of a report."""
+    return re.findall(r"(?:Possible data race|This conflicts with).*? by thread #(\d+)", block)
 
 
 def access_top_frames(block):
@@ -36,6 +58,7 @@ def main():
     log = open(sys.argv[1], errors="replace").read()
     blocks = re.split(r"==\d+== -{10,}", log)
 
+    threads = engine_threads(log)
     engine = collections.Counter()
     samples = {}
     others = 0
@@ -44,11 +67,12 @@ def main():
             continue
 
         tops = access_top_frames(block)
-        if not any(ENGINE in top for top in tops):
+        on_engine_thread = any(t in threads for t in access_threads(block))
+        if not any(ENGINE in top for top in tops) and not on_engine_thread:
             others += 1
             continue
 
-        symbols = [re.search(r": (.*?) \(in ", top).group(1) for top in tops if ENGINE in top]
+        symbols = [re.search(r": (.*?)(?: \(in |$)", top).group(1) for top in tops]
         key = " / ".join(symbols[:3])
         engine[key] += 1
         samples.setdefault(key, block)

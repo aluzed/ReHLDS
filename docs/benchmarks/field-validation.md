@@ -49,6 +49,7 @@ plugin error, no player complaint specific to the session.
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-12 | `6405e18` | on | 1 + bots | ≈ 20 min | 1000.0 | 56 µs (bots only, last minute) | 0 | First player: "ultra smooth". |
 | 2026-10-12 | `6405e18` | on | 1 + 10 bots, CSDM FFA | ≈ 35 min | – | – (no capture) | 0 | 227 kills; no timeout, all disconnects client-initiated. |
+| 2026-10-12 | `c937268` | on, `sv_parallel_send 1` | 1 + 18 bots, CSDM FFA | ≈ 7 min | 999.9 | 328 µs | 1 | Crash at the map change after the player left: heap corrupted by the encoding threads through Metamod, fixed (MT-404). |
 
 ## Findings
 
@@ -64,5 +65,23 @@ plugin error, no player complaint specific to the session.
   `changelevel` by RCON, CSDM loaded at runtime): no crash, no restart, no AMX Mod X
   error, no client timeout (every disconnect is "Client sent 'drop'"), no packet dropped
   by the network thread (queue at most 58 of 1024 packets).
+* **Crash with `sv_parallel_send 1`** (`c937268`, second day): one player with 18 bots
+  in CSDM FFA. The player left, `bot_join_after_player` kicked the bots, and the
+  `changelevel` 45 s later aborted in `malloc` (`unsorted double linked list
+  corrupted`) while Metamod-R re-read `plugins.ini`. The core dump showed three freed
+  16-byte chunks with their first word decremented by one, and the same build crashed
+  on the first map change with load clients instead of the player, never with
+  `sv_parallel_send 0`. Cause: the game DLL's conditional encoders, on the encoding
+  threads, called the engine through Metamod's callbacks, which save and restore global
+  state without a lock, while the main thread ran Metamod code too; at the map change
+  Metamod-R rebuilt its callbacks from a stale stack pointer. Fixed in MT-404 (the
+  encoders no longer run alongside game DLL code); `tools/bench/mapchange_check.sh`
+  covers it. The release `3.15.0-mt.1` does not contain the encoding threads.
+* Profile of that session before the crash (402 s at 1000 Hz, the player alone for the
+  first minute, then with 18 bots): 999.9 ticks/s, 38.7 µs tick jitter, 4 % busy;
+  frame avg / p95 / p99 40 / 150 / 328 µs. The frame peaks are game DLL physics with
+  the bots (`physics` p99 292 µs, max 3.3 ms); the send to one player takes 3.1 µs on
+  average (54 µs p99), 96 % of the snapshots encoded by the workers. The network thread
+  dropped nothing.
 * Still missing for the go/no-go: a frame profile with several players, and the
   comparison session with the features off.

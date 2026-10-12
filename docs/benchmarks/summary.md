@@ -49,15 +49,21 @@ scheduler and snapshot spreading.
 
 | | Before | After | Change |
 |---|---|---|---|
-| Server FPS | 607.2 | 1000.0 | +65 %, exact |
-| Tick interval p99 | 3497 µs | 1711 µs | −51 % |
-| Tick jitter (stddev) | 617 µs | 222 µs | ÷2.8 |
-| Frame avg / p99 | 588 / 2429 µs | 346 / 1673 µs | −41 % / −31 % |
-| Snapshot send, main thread, avg / p99 | 319 / 1770 µs | 152 / 498 µs | −52 % / −72 % |
-| Snapshot encoding on the main thread, avg / p99 | 164 / 943 µs | 48 / 99 µs | −71 % / −90 % |
-| Main thread CPU | 35.9 % | 35.1 % | = for +65 % frames |
-| Whole process CPU (cores used) | 36.5 % | 59.1 % | +0.23 core (2 encoding threads) |
-| Snapshots per client | 59.7 /s | 58.2 /s | = (limited by `sv_maxrate`) |
+| Server FPS | 607.2 | 999.6 | +65 %, exact |
+| Tick interval p99 | 3497 µs | 1735 µs | −50 % |
+| Tick jitter (stddev) | 617 µs | 199 µs | ÷3.1 |
+| Frame avg / p99 | 588 / 2429 µs | 374 / 1701 µs | −36 % / −30 % |
+| Snapshot send, main thread, avg / p99 | 319 / 1770 µs | 177 / 670 µs | −45 % / −62 % |
+| Snapshot encoding on the main thread, avg / p99 | 164 / 943 µs | 73 / 265 µs | −55 % / −72 % |
+| Main thread CPU | 35.9 % | 37.9 % | ≈ for +65 % frames |
+| Whole process CPU (cores used) | 36.5 % | 69.5 % | +0.33 core (2 encoding threads) |
+| Snapshots per client | 59.7 /s | 64.5 /s | ≈ (limited by `sv_maxrate`) |
+
+"After" is the average of three runs. Most of the gain comes from the scheduler and
+snapshot spreading: with them but without the encoding threads, the frame p99 is the
+same (1701 µs) and the send takes 203 / 933 µs. The encoding threads take a quarter off
+the send phase and its peaks for a third of a core; with Counter-Strike they encode once
+every snapshot is gathered, see [`../performance-tuning.md`](../performance-tuning.md).
 
 The snapshots carry ≈ 150 entities and exceed `sv_maxrate 100000`: the clients get what
 their rate allows in both cases. The frame p99 still exceeds the 1 ms tick: it is the
@@ -86,7 +92,7 @@ sees it.
 |---|---|---|
 | Threads used by the server | 1 (+ Steam) | 1 game loop + 1 network thread + 2 encoding threads |
 | Extra CPU, quiet server | – | ≈ 0 (the threads sleep) |
-| Extra CPU, heavy server | – | ≈ 0.25 core (encoding moved off the main thread, plus spinning) |
+| Extra CPU, heavy server | – | ≈ 0.33 core (encoding threads, which wait while the main thread gathers) |
 | Extra CPU, query flood | – | ≈ 0.25 core (filtering the flood) |
 | Output to the clients | – | byte-identical for the same inputs (replays) |
 | Plugins | – | game DLL, Metamod, AMX Mod X and ReAPI hooks still on the main thread |

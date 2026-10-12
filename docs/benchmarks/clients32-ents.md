@@ -87,6 +87,35 @@ the datagrams in client order at the end. All runs with `+sys_scheduler 1
 * No measurable cost on the serial path (`clients32`, `sv_parallel_send 0`):
   `send_messages` 45.6 → 45.7–47.0 µs.
 
+## After the Metamod fix: encoding after the gather
+
+The measurements above encoded each snapshot while the main thread gathered the next.
+That ran the game DLL's conditional encoders, and through them Metamod's callbacks, on
+the workers while the main thread ran game DLL and Metamod code: it corrupted the heap
+and crashed the server at map changes (see [`field-validation.md`](field-validation.md)).
+With Counter-Strike, the workers now encode once every snapshot of the frame is
+gathered. Three runs of each, same session, `+sys_scheduler 1 +sv_rehlds_snapshot_spread 1`:
+
+| | Serial | 2 workers, after the gather |
+|---|---|---|
+| Server FPS | 998.2 | 999.6 |
+| Tick interval p99 | 1747 µs | 1735 µs |
+| Tick jitter (stddev) | 215 µs | 199 µs |
+| Frame avg / p99 | 397 / 1701 µs | 374 / 1701 µs |
+| `send_messages` avg / p99 | 203 / 933 µs | 177 / 670 µs |
+| `encode` on the main thread, avg / p99 | 103 / 482 µs | 73 / 265 µs |
+| Main thread CPU | 40.1 % | 37.9 % |
+| Process CPU | 40.6 % | 69.5 % |
+
+* The send phase is 13 % shorter on average and its p99 28 % lower; the frame p99 does
+  not change, it is game DLL time.
+* The serial runs of this session are faster than the baseline above (send 203 against
+  251 µs): the same configuration varies by ±15 % from run to run on this machine, hence
+  the three runs.
+* The workers spin while the main thread gathers, waiting for the snapshots: a third of
+  a core for two workers.
+* Replays stay byte-identical with 2 and 3 workers.
+
 ## Reproduce
 
 ```sh

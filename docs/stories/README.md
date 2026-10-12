@@ -159,9 +159,13 @@ of the encoding cost) and 400 moving entities. There, encoding is the largest pa
 the send (126 µs per frame, 404 µs p99) and the frame exceeds the 1 ms tick at p95.
 
 MT-401 to MT-404 are done: with `-sys_threads 2 +sv_parallel_send 1`, the main thread
-gathers the snapshots from the game DLL and two workers encode them meanwhile;
-`send_messages` drops by 40 % (251 → 152 µs, p99 790 → 498 µs), with byte-identical
-replays. What remains above the tick is game DLL time (player movement, `AddToFullPack`).
+gathers the snapshots from the game DLL and two workers encode them, with byte-identical
+replays. The first version encoded during the gather, and the game DLL's conditional
+encoders then ran Metamod's non-thread-safe callbacks on the workers: heap corruption and
+a crash at a map change on the field server (MT-404). With Counter-Strike, the encoding
+now starts once the frame's snapshots are gathered; `send_messages` drops by 13 % (203 →
+177 µs, p99 933 → 670 µs) for a third of a core. What remains above the tick is game DLL
+time (player movement, `AddToFullPack`).
 ## Explicit non-goals
 
 * Running physics, `Think`/`Touch`, player movement (`PM_Move`) or any game DLL code in

@@ -58,6 +58,22 @@ BENCH_RECORD=1 tools/bench/run.sh replay x   # record a session (any scenario)
 tools/bench/replay.sh .bench/results/<run> y # replay it with build y, compare
 BENCH_HELGRIND=ON tools/bench/build.sh helgrind
 tools/bench/race_check.sh helgrind 90        # Helgrind on the server with the network thread
+tools/bench/mapchange_check.sh x 8           # 8 map changes with Metamod, bots, encoding threads
+```
+
+`race_check.sh` loads Metamod and AMX Mod X when `setup.sh` installed them, changes the
+map once, and counts a report as the engine's when an access is in engine code or on a
+thread the engine created. Valgrind runs one thread at a time, so the main thread
+encodes nearly every snapshot itself under it: `mapchange_check.sh` covers the encoding
+threads instead, natively, with `MALLOC_CHECK_=3`. It fails when the server crashes on a
+map change or on `quit`; the engine before the MT-404 fix crashed at the 2nd map change.
+
+Memcheck needs the debug symbols of the 32-bit loader, which the multilib glibc of the
+main image lacks: run it with the native i386 image of `docker/memcheck`.
+
+```sh
+docker build -t rehlds-bench:memcheck tools/bench/docker/memcheck
+BENCH_IMAGE=rehlds-bench:memcheck tools/bench/race_check.sh x 180 memcheck
 ```
 
 The `replay` scenario has load clients and HLTV proxies but no bots: sessions with bots
@@ -87,7 +103,8 @@ real GoldSrc protocol: challenge, `connect`, netchan with reliable acknowledgeme
 bzip2 fragment reassembly, sign-on (`new`, `sendres`, `spawn`, `sendents`), team join,
 then `clc_move` at `CLIENT_CMDRATE` with moving players and `clc_delta` acknowledgements.
 Server packets are only decoded during sign-on; in game the netchan header is enough, so
-one process drives 32 players.
+one process drives 32 players. Reliable messages made only of prints (AMX Mod X prints
+to clients during the sign-on) are skipped.
 
 It records the interval between server packets of each client over the profiling window
 (`clients.json`), which the report shows as the client-perceived snapshot rate and jitter.
