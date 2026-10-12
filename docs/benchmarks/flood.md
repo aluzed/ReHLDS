@@ -44,21 +44,26 @@ dropped the rest, legitimate packets included.
 
 ## Junk flood (connected-client traffic)
 
-| | No flood | Flood, sync | Flood, network thread |
-|---|---|---|---|
-| Server FPS | 1000.0 | 999.9 | 1000.0 |
-| Tick jitter (stddev) | 17.3 µs | 32.6 µs | **17.7 µs** |
-| Frame avg / p99 | 75 / 263 µs | 156 / 510 µs | **87 / 240 µs** |
-| `read_packets` avg / p99 | 20 / 186 µs | 100 / 434 µs | **28 / 160 µs** |
-| Main thread CPU | 8.0 % | 16.1 % | **9.2 %** |
-| Snapshots per client | 100.0 /s | 100.0 /s | 100.0 /s |
+| | No flood | Flood, sync | Flood, thread, no address filter | Flood, thread |
+|---|---|---|---|---|
+| Server FPS | 1000.0 | 999.9 | 1000.0 | 1000.0 |
+| Tick jitter (stddev) | 17.3 µs | 32.6 µs | 17.7 µs | 21.4 µs |
+| Frame avg / p99 | 75 / 263 µs | 156 / 510 µs | 87 / 240 µs | **78 / 237 µs** |
+| `read_packets` avg / p99 | 20 / 186 µs | 100 / 434 µs | 28 / 160 µs | **16 / 150 µs** |
+| Packets read by the main thread | 3.1 /frame | 52 /frame | 53 /frame | **3.2 /frame** |
+| Main thread CPU | 8.0 % | 16.1 % | 9.2 % | **8.2 %** |
+| Snapshots per client | 100.0 /s | 100.0 /s | 100.0 /s | 100.0 /s |
 
-Packets that are not connectionless are not filtered by the thread: the main thread
-still matches each one against the client list (53 packets/frame). The thread removes
-the receive syscalls from the main thread (`read_packets` −72 %), but the frame average
-stays 15 % above the no-flood run. Dropping packets from addresses that are not
-connected clients on the thread would remove the rest; it needs the client address list
-published to the thread (follow-up, see MT-303).
+The main thread ignores packets that are not connectionless unless they come from a
+connected client, after matching each one against the client list. The first version of
+the thread passed them on, which only removed the receive syscalls from the main thread.
+The thread now gets the clients' addresses and drops the others itself: 1 499 882 of the
+1 500 000 flood packets ("unknown address"), and the main thread is back to its
+no-flood numbers. The other 118 were not seen by the thread (not investigated).
+
+The address list is published every frame when it changed, and by `SV_ConnectClient`
+before it sends the accept packet: in `clients32` with the thread, no packet of the 32
+connecting clients was dropped ("unknown address" 0).
 
 ## Functional checks with the thread
 
@@ -68,6 +73,9 @@ Same results with and without `-netthread`:
   "You have been banned from this server." at once, others are still answered;
   `removeip` restores answers immediately;
 * map change, `restart` and `quit` with the thread running; exit code 0.
+
+The "Flood, thread" columns of the A2S table were measured before the address filter;
+with it: 1000 FPS, `read_packets` 14 / 143 µs avg / p99, main thread CPU 7.6 %.
 
 ## Reproduce
 

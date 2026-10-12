@@ -31,6 +31,7 @@ namespace
 		"malformed",
 		"rate limited",
 		"banned",
+		"unknown address",
 	};
 
 	const char BAN_MESSAGE[] = "You have been banned from this server.\n";
@@ -85,7 +86,9 @@ bool CNetReceiveThread::FilterInputs::operator==(const FilterInputs &other) cons
 		&& maxQueriesSecGlobal == other.maxQueriesSecGlobal
 		&& maxQueriesWindow == other.maxQueriesWindow
 		&& filtersVersion == other.filtersVersion
-		&& numFilters == other.numFilters;
+		&& numFilters == other.numFilters
+		&& preprocessHooked == other.preprocessHooked
+		&& clientsVersion == other.clientsVersion;
 }
 
 CNetReceiveThread::CNetReceiveThread() :
@@ -95,6 +98,8 @@ CNetReceiveThread::CNetReceiveThread() :
 	m_PublishedInputs(),
 	m_bConfigPublished(false),
 	m_ReportedDrops(0),
+	m_NumClients(0),
+	m_ClientsVersion(0),
 #ifdef _WIN32
 	m_hThread(nullptr),
 #endif
@@ -240,8 +245,46 @@ void CNetReceiveThread::Stop()
 	m_bRunning = false;
 }
 
+void CNetReceiveThread::ClientsChanged()
+{
+	if (m_bRunning)
+		BeginFrame();
+}
+
+bool CNetReceiveThread::UpdateClientList()
+{
+	// Same clients as the loop of SV_ReadPackets
+	ClientAddress clients[MAX_CLIENTS];
+	int numClients = 0;
+
+	for (int i = 0; i < g_psvs.maxclients && numClients < MAX_CLIENTS; i++)
+	{
+		const client_t *cl = &g_psvs.clients[i];
+		if (!cl->connected && !cl->active && !cl->spawned)
+			continue;
+
+		if (cl->netchan.remote_address.type != NA_IP)
+			continue;
+
+		ClientAddress &client = clients[numClients++];
+		Q_memset(&client, 0, sizeof(client));
+		client.ip = *(const uint32 *)cl->netchan.remote_address.ip;
+		client.port = cl->netchan.remote_address.port;
+	}
+
+	if (numClients == m_NumClients && !Q_memcmp(clients, m_Clients, numClients * sizeof(ClientAddress)))
+		return false;
+
+	Q_memcpy(m_Clients, clients, numClients * sizeof(ClientAddress));
+	m_NumClients = numClients;
+	m_ClientsVersion++;
+	return true;
+}
+
 void CNetReceiveThread::BeginFrame()
 {
+	UpdateClientList();
+
 	FilterInputs inputs = CurrentInputs();
 	if (!m_bConfigPublished || !(inputs == m_PublishedInputs))
 		PublishConfig(inputs);
@@ -266,6 +309,8 @@ CNetReceiveThread::FilterInputs CNetReceiveThread::CurrentInputs() const
 	inputs.maxQueriesWindow = max_queries_window.value;
 	inputs.filtersVersion = ipfilters_version;
 	inputs.numFilters = numipfilters;
+	inputs.preprocessHooked = !g_RehldsHookchains.m_PreprocessPacket.isEmpty();
+	inputs.clientsVersion = m_ClientsVersion;
 	return inputs;
 }
 
@@ -279,6 +324,9 @@ void CNetReceiveThread::PublishConfig(const FilterInputs &inputs)
 	config->maxQueriesSec = inputs.maxQueriesSec;
 	config->maxQueriesSecGlobal = inputs.maxQueriesSecGlobal;
 	config->maxQueriesWindow = inputs.maxQueriesWindow;
+	config->dropUnknownAddresses = inputs.filterEnabled && !inputs.preprocessHooked;
+	config->numClients = m_NumClients;
+	Q_memcpy(config->clients, m_Clients, m_NumClients * sizeof(ClientAddress));
 
 	// Same rules as SV_FilterPacket, with the expiry converted from realtime
 	// to a monotonic deadline that the thread can check on its own
@@ -472,9 +520,14 @@ int CNetReceiveThread::Classify(const unsigned char *data, int size, const netad
 	if (size < 4)
 		return NTD_MALFORMED;
 
-	// Connected clients' packets are matched against the client list on the main thread
 	if (*(uint32 *)data != 0xFFFFFFFF)
+	{
+		// Netchan traffic: SV_ReadPackets ignores it unless it comes from a client
+		if (config->dropUnknownAddresses && from.type == NA_IP && !IsClientAddress(from))
+			return NTD_UNKNOWN_ADDRESS;
+
 		return NTD_NONE;
+	}
 
 	// Same order as SV_ReadPackets: rate limits, then IP filters
 	if (config->rateLimitEnabled
@@ -503,6 +556,20 @@ bool CNetReceiveThread::IsBanned(const netadr_t &from, uint64 now) const
 	}
 
 	return !config->negativeFilter;
+}
+
+bool CNetReceiveThread::IsClientAddress(const netadr_t &from) const
+{
+	const FilterConfig *config = m_Config.get();
+	uint32 ip = *(const uint32 *)from.ip;
+
+	for (int i = 0; i < config->numClients; i++)
+	{
+		if (config->clients[i].ip == ip && config->clients[i].port == from.port)
+			return true;
+	}
+
+	return false;
 }
 
 void CNetReceiveThread::SendBan(SOCKET sock, const struct sockaddr *to, int tolen, uint64 now)

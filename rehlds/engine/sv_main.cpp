@@ -2562,6 +2562,11 @@ void EXT_FUNC SV_ConnectClient_internal(void)
 	g_GameClients[host_client - g_psvs.clients]->SetReconnectDeadline(0.0);
 #endif // REHLDS_FIXES
 
+#ifdef REHLDS_FIXES
+	// The client answers as soon as it is accepted: the network thread must know its address first
+	g_NetReceiveThread.ClientsChanged();
+#endif
+
 	bIsSecure = Steam_GSBSecure();
 	Netchan_OutOfBandPrint(NS_SERVER, adr, "%c %i \"%s\" %i %i", S2C_CONNECTION, host_client->userid, NET_AdrToString(host_client->netchan.remote_address), bIsSecure, build_number()
 #ifdef REHLDS_FIXES

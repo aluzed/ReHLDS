@@ -23,6 +23,7 @@ enum NetThreadDropReason
 	NTD_MALFORMED,            // oversized, split packet sent to the server, or shorter than 4 bytes
 	NTD_RATE_LIMITED,         // connectionless packet over the max_queries_* limits
 	NTD_BANNED,               // connectionless packet from an address rejected by the IP filters
+	NTD_UNKNOWN_ADDRESS,      // netchan packet from an address that is not a connected client
 
 	NTD_COUNT
 };
@@ -42,6 +43,12 @@ enum NetThreadDropReason
 // When a plugin hooks PreprocessPacket or SV_CheckConnectionLessRateLimits, the
 // thread only drops malformed and banned packets and leaves rate limiting to the
 // main thread, where the hooks run.
+//
+// Packets that are not connectionless are only accepted from the addresses of
+// connected clients, the same check as the client loop of SV_ReadPackets. The
+// address list is published every frame when it changed, and by SV_ConnectClient
+// before it accepts a client, so that the client's first packets are never
+// dropped. When a plugin hooks PreprocessPacket, every packet is kept.
 class CNetReceiveThread
 {
 public:
@@ -63,6 +70,10 @@ public:
 	// filter configuration when it changed and reports drops to the profiler.
 	void BeginFrame();
 
+	// Main thread: a client was given a connection, publish its address before
+	// it is told so
+	void ClientsChanged();
+
 	// Main thread: pops the oldest packet into msg and from
 	bool Pop(sizebuf_t *msg, netadr_t *from);
 
@@ -75,6 +86,12 @@ private:
 		uint64 arrivalNs;
 		int size;
 		unsigned char data[MAX_UDP_PACKET];
+	};
+
+	struct ClientAddress
+	{
+		uint32 ip;
+		uint16 port;	// network byte order, like netadr_t
 	};
 
 	struct FilterEntry
@@ -94,6 +111,10 @@ private:
 		float maxQueriesSecGlobal;
 		float maxQueriesWindow;
 		std::vector<FilterEntry> entries;
+
+		bool dropUnknownAddresses;
+		int numClients;
+		ClientAddress clients[MAX_CLIENTS];
 	};
 
 	// Main thread copy of the inputs of the last published configuration
@@ -107,6 +128,8 @@ private:
 		float maxQueriesWindow;
 		int filtersVersion;
 		int numFilters;
+		bool preprocessHooked;
+		int clientsVersion;
 
 		bool operator==(const FilterInputs &other) const;
 	};
@@ -125,6 +148,7 @@ private:
 	// Returns NTD_NONE to queue the packet, or the reason for dropping it
 	int Classify(const unsigned char *data, int size, const netadr_t &from, uint64 now);
 	bool IsBanned(const netadr_t &from, uint64 now) const;
+	bool IsClientAddress(const netadr_t &from) const;
 	void SendBan(SOCKET sock, const struct sockaddr *to, int tolen, uint64 now);
 	void RefreshConfig();
 
@@ -144,6 +168,12 @@ private:
 	FilterInputs m_PublishedInputs;
 	bool m_bConfigPublished;
 	uint32 m_ReportedDrops;
+
+	// Addresses of the connected clients when they were last published
+	bool UpdateClientList();
+	ClientAddress m_Clients[MAX_CLIENTS];
+	int m_NumClients;
+	int m_ClientsVersion;
 
 #ifdef _WIN32
 	HANDLE m_hThread;

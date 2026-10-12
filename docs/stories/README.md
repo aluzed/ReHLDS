@@ -132,10 +132,11 @@ from 4096 addresses on the full server ([`../benchmarks/flood.md`](../benchmarks
 * with `-netthread`, the main thread's frame times and CPU are those of the no-flood
   run; the thread drops the flood for about 23 % of a core.
 
+The thread also drops netchan packets from addresses that are not connected clients:
+under a junk flood of 50 000 packets/s, the main thread keeps its no-flood numbers.
+
 Next: Windows CI build (all the Windows code paths of MT-002, MT-101, MT-302), then
-MT-004 (byte-exact replay) before any deeper change. Possible follow-up: drop packets
-from unknown addresses on the network thread (junk flood still costs the main thread
-+15 % per frame).
+MT-004 (byte-exact replay) before any deeper change.
 
 ## Explicit non-goals
 

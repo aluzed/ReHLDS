@@ -55,6 +55,11 @@ Done (`rehlds/rehlds/net_receive_thread.cpp`), cvar `net_thread_filter` (default
   `SV_CheckConnectionLessRateLimits`) and the IP filters (`sv_filterban` semantics).
   Banned addresses get the same "You have been banned" reply as `SV_SendBan`, sent from
   the thread, at most 20 per second.
+* With `net_thread_filter 1` and no plugin hooking `PreprocessPacket`: packets that are
+  not connectionless are dropped unless they come from a connected client (same test as
+  the client loop of `SV_ReadPackets`, IP addresses only). The address list is published
+  with the filters, every frame when it changed and by `SV_ConnectClient` before the
+  accept packet, so a new client's first packets are never dropped.
 * The main thread publishes the filters and limits at the start of `SV_ReadPackets` when
   they changed (`ipfilters_version` bumped by `addip` / `removeip`, cvars, hook
   registration): an immutable snapshot swapped under a mutex, taken by the thread when
@@ -66,9 +71,8 @@ Done (`rehlds/rehlds/net_receive_thread.cpp`), cvar `net_thread_filter` (default
 
 Not done:
 
-* Connected-client traffic is not filtered: a junk flood shaped like netchan packets
-  still costs the main thread +15 % per frame (`flood-junk`). Follow-up: publish the
-  client address list and drop packets from unknown addresses on the thread.
+* Junk flood from the address of a connected client (spoofed address and port): it
+  reaches the main thread, which rejects it in `Netchan_Process`.
 * `sv_logblocks` messages are not printed for packets the thread rate limits.
 
 Results: [`../benchmarks/flood.md`](../benchmarks/flood.md).
