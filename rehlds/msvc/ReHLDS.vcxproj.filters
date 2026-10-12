@@ -236,6 +236,9 @@
     <ClCompile Include="..\unittests\spsc_ring_tests.cpp">
       <Filter>unittests</Filter>
     </ClCompile>
+    <ClCompile Include="..\unittests\worker_pool_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
     <ClCompile Include="..\engine\com_custom.cpp">
       <Filter>engine\common</Filter>
     </ClCompile>
@@ -330,6 +333,15 @@
       <Filter>rehlds</Filter>
     </ClCompile>
     <ClCompile Include="..\rehlds\net_replay.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\parallel_send.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\thread_state.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\threading\worker_pool.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
     <ClCompile Include="..\engine\sse_mathfun.cpp">
@@ -1064,6 +1076,15 @@
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\threading\spsc_ring.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\parallel_send.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\thread_state.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\threading\worker_pool.h">
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\monotonic_clock.h">

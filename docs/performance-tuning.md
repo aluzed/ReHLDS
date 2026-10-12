@@ -21,6 +21,8 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `-netthread` | MT-302 | off | on | Network thread, the tick no longer sees floods |
 | `-netthread_queue` | MT-302 | 1024 | 1024 | Queue between the network thread and the game loop |
 | `net_thread_filter` | MT-303 | 1 | 1 | Early filtering on the network thread |
+| `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers: 2, 1 | Snapshots encoded on worker threads |
+| `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
 
@@ -145,6 +147,50 @@ Network thread: running, queue 0/1024 packets (max 58), filter on
 loop was stalled for longer than the queue holds (a long map change, a plugin blocking):
 raise `-netthread_queue` (64–16384, rounded to a power of two).
 
+## Many players and entities: parallel snapshot encoding
+
+Each snapshot is built in two parts: the game DLL decides what each client sees
+(`AddToFullPack`, the gather), then the engine delta-encodes it (the encode). On a full
+server with many entities, encoding is the largest part of the send: about 50 µs per
+snapshot of 150 entities.
+
+`-sys_threads 2 +sv_parallel_send 1` moves the encoding to two worker threads. The main
+thread still gathers every snapshot, in the same order as before, and each one is
+encoded by a worker while the main thread gathers the next; the main thread then
+transmits the datagrams in client order. The packets are byte-identical to the serial
+ones.
+
+Measured with 32 playing clients and 400 moving entities
+([`benchmarks/clients32-ents.md`](benchmarks/clients32-ents.md)):
+
+| | Serial | 2 workers |
+|---|---|---|
+| `send_messages` avg / p99 | 251 / 790 µs | 152 / 498 µs |
+| Frame avg / p99 | 453 / 1896 µs | 346 / 1673 µs |
+| Main thread CPU | 45.9 % | 35.1 % |
+| Process CPU | 46.4 % | 59.1 % |
+
+When to use it:
+
+* Servers whose snapshots are big: many players in sight of each other, many visible
+  entities (deathmatch, mods with many props or projectiles). On a 32-player server with
+  ordinary rounds the encoding is ≈ 15 µs per frame, and there is nothing to gain.
+* Two workers are enough: with snapshot spreading, a frame has 2–3 snapshots. A third
+  one only adds CPU. `-sys_threads auto` starts one per CPU but one, up to 8, which is
+  more than useful.
+* Count the workers in the cores per instance: they use ≈ 12 % of a core each on the
+  heavy benchmark, mostly encoding moved off the main thread.
+* `sys_threads_spin_us` makes the workers spin between frames instead of sleeping. The
+  workers are already woken while the first snapshot of a frame is gathered, so it only
+  costs CPU; leave it at 0.
+
+Plugins: the game DLL's own encoders (`Entity_Encode`, `Player_Encode`) run on the
+workers, one at a time. A plugin hooking the encode through ReAPI keeps its hook on the
+main thread: with `SV_EmitPings` hooked (scoreboard plugins), the snapshots carrying
+pings are encoded by the main thread; with `SV_CreatePacketEntities` or `SV_EmitEvents`
+hooked, all of them. `sv_parallel_send_stats` says which applies; the console also logs
+it when it changes.
+
 ## The machine
 
 These matter as much as the engine options at 1000 Hz:
@@ -157,7 +203,8 @@ These matter as much as the engine options at 1000 Hz:
   servers on one machine, give each its own physical core with `taskset -c N` and keep
   the network threads off the game loops' cores if possible (one spare core can serve
   several instances' network threads). Avoid putting two instances on the two hardware
-  threads of the same core.
+  threads of the same core. With `-sys_threads`, give the instance's workers cores of
+  their own as well, or leave them out (`sv_parallel_send 0`) when cores are short.
 * **Socket buffers**: the engine does not set the socket buffer size, so the kernel's
   default applies (`net.core.rmem_default`, often 208 KB). Under a
   flood, a larger buffer gives the network thread room to catch up:

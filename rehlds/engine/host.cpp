@@ -1194,6 +1194,7 @@ int Host_Init(quakeparms_t *parms)
 
 	FrameProfiler_Init();
 	FrameScheduler_Init();
+	ParallelSend_Init();
 
 
 	Q_snprintf(versionString, sizeof(versionString), "%s,%i,%i", gpszVersionString, PROTOCOL_VERSION, build_number());
@@ -1296,6 +1297,7 @@ void Host_Shutdown(void)
 
 	FrameProfiler_Shutdown();
 	FrameScheduler_Shutdown();
+	ParallelSend_Shutdown();
 
 	Cmd_RemoveGameCmds();
 	Cmd_Shutdown();

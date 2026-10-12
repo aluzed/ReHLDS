@@ -289,6 +289,8 @@ typedef struct client_snapshot_s
 	qboolean sendPings;
 	uint16 pings[MAX_CLIENTS];
 	uint8 packetLoss[MAX_CLIENTS];
+	qboolean hasEvents;
+	event_state_t events;    // the client's queued events (when hasEvents), the queue is emptied
 	qboolean unreliableOverflowed;
 	byte unreliable[MAX_DATAGRAM];
 	int unreliableSize;
@@ -470,7 +472,8 @@ extern int numuserfilters;
 extern challenge_t g_rg_sv_challenges[MAX_CHALLENGES];
 
 extern rcon_failure_t g_rgRconFailures[32];
-extern deltacallback_t g_svdeltacallback;
+// Per thread (snapshots are encoded on worker threads): engine_thread_state_t
+#define g_svdeltacallback (ThreadState()->deltaCallback)
 
 delta_t *SV_LookupDelta(char *name);
 NOXREF void SV_DownloadingModules(void);

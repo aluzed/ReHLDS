@@ -51,9 +51,12 @@
 #include "flight_recorder.h"
 #include "rehlds_messagemngr_impl.h"
 #include "rehlds_security.h"
+#include "thread_state.h"
 #include "frame_profiler.h"
 #include "frame_scheduler.h"
 #include "net_receive_thread.h"
+#include "threading/worker_pool.h"
+#include "parallel_send.h"
 #include "net_replay.h"
 
 #include "dlls/cdll_dll.h"

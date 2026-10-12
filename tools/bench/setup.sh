@@ -4,7 +4,7 @@
 #   - installs the steam_legacy HLDS (cstrike) with steamcmd,
 #   - builds ReGameDLL_CS from source (provides bots) and installs it,
 #   - generates the navigation mesh for the benchmark maps,
-#   - installs Metamod-R and AMX Mod X with the benchmark plugins (tools/bench/plugins),
+#   - installs Metamod-R, AMX Mod X and ReAPI with the benchmark plugins (tools/bench/plugins),
 #     loaded only by the scenarios that set METAMOD=1 (-dll), never through liblist.gam.
 #
 # Everything goes to $BENCH_DIR (default: <repo>/.bench).
@@ -67,18 +67,23 @@ for map in de_dust2; do
 	fi
 done
 
-# Metamod-R and AMX Mod X, with only the benchmark plugins
+# Metamod-R, AMX Mod X and ReAPI, with only the benchmark plugins
 game=$HLDS_DIR/cstrike
 downloads=$BENCH_DIR/downloads
-if [ ! -f "$game/addons/metamod/metamod_i386.so" ]; then
-	log "installing Metamod-R $METAMOD_RELEASE and AMX Mod X $AMXX_RELEASE"
-	mkdir -p "$downloads"/{metamod,amxx}
+if [ ! -f "$game/addons/amxmodx/modules/reapi_amxx_i386.so" ]; then
+	log "installing Metamod-R $METAMOD_RELEASE, AMX Mod X $AMXX_RELEASE and ReAPI $REAPI_RELEASE"
+	mkdir -p "$downloads"/{metamod,amxx,reapi}
 	gh release download "$METAMOD_RELEASE" -R rehlds/Metamod-R -p 'metamod-bin-*.zip' -D "$downloads/metamod" --clobber
 	gh release download "$AMXX_RELEASE" -R alliedmodders/amxmodx -p '*base-linux.tar.gz' -D "$downloads/amxx" --clobber
+	gh release download "$REAPI_RELEASE" -R rehlds/ReAPI -p 'reapi-bin-*.zip' -D "$downloads/reapi" --clobber
 	(cd "$downloads/metamod" && unzip -q -o ./*.zip -d x)
+	(cd "$downloads/reapi" && unzip -q -o ./*.zip -d x)
 	mkdir -p "$game/addons/metamod"
 	cp "$downloads/metamod/x/addons/metamod/metamod_i386.so" "$downloads/metamod/x/addons/metamod/config.ini" "$game/addons/metamod/"
 	tar xzf "$downloads"/amxx/*base-linux.tar.gz -C "$game"
+	cp "$downloads/reapi/x/addons/amxmodx/modules/reapi_amxx_i386.so" "$game/addons/amxmodx/modules/"
+	cp "$downloads"/reapi/x/addons/amxmodx/scripting/include/*.inc "$game/addons/amxmodx/scripting/include/"
+	grep -qs '^reapi' "$game/addons/amxmodx/configs/modules.ini" || echo reapi >> "$game/addons/amxmodx/configs/modules.ini"
 	echo 'linux addons/amxmodx/dlls/amxmodx_mm_i386.so' > "$game/addons/metamod/plugins.ini"
 fi
 

@@ -111,6 +111,8 @@ This means that plugins that do binary code analysis (Orpheu for example) probab
 <li>sv_rehlds_snapshot_spread &lt;1|0&gt; // Spread the clients' snapshots evenly over the frames (each client gets a fixed phase in its update interval) instead of sending them all in the same frame, and keep the exact cl_updaterate. Default: 0
 <li>sv_profile_enable &lt;1|0&gt; // Record the per-phase timings of every frame continuously (last sv_profile_frames frames). sv_profile &lt;seconds&gt; records without it. Default: 0
 <li>sv_profile_frames &lt;1000-600000&gt; // Number of frames the profiler keeps. Takes effect after sv_profile_reset. Default: 60000
+<li>sv_parallel_send &lt;1|0&gt; // Encode the clients' snapshots on the worker threads started with -sys_threads, while the main thread gathers the next ones from the game DLL. Snapshots stay byte-identical. Falls back to the main thread for the snapshots a plugin hooks (ReAPI SV_EmitPings: snapshots with pings; SV_CreatePacketEntities, SV_EmitEvents: all). See [performance tuning](docs/performance-tuning.md). Default: 0
+<li>sys_threads_spin_us &lt;0-2000&gt; // How long the worker threads spin for the next frame's snapshots before sleeping. Default: 0
 <li>net_thread_filter &lt;1|0&gt; // With -netthread, drop on the network thread the packets the main thread would ignore: IP-banned addresses (sv_filterban), queries above the rate limits, malformed packets and game packets from addresses that are not connected. Default: 1
 </ul>
 </details>
@@ -118,6 +120,7 @@ This means that plugins that do binary code analysis (Orpheu for example) probab
 ### Command-line parameters
 <ul>
 <li>-netthread // Read the server socket on a dedicated network thread, which filters floods and junk before they reach the game loop (see net_thread_filter). Default: off
+<li>-sys_threads &lt;N|auto&gt; // Start N worker threads (at most 8; auto: one per CPU but one) for sv_parallel_send. Default: 0 (none)
 <li>-netthread_queue &lt;64-16384&gt; // Size in packets of the queue between the network thread and the main thread. Default: 1024
 <li>-netrecord &lt;file&gt; // Record the inputs of the session (clock, packets, console) to replay it byte for byte. For developers, see [docs/benchmarks/replay.md](docs/benchmarks/replay.md)
 <li>-netreplay &lt;file&gt; // Replay a session recorded with -netrecord as fast as possible, without the network, then quit
@@ -136,6 +139,7 @@ See [docs/performance-tuning.md](docs/performance-tuning.md) for the recommended
 <li>sv_profile [seconds] // Record the per-phase frame timings for &lt;seconds&gt;, then print a report (tick rate, jitter, percentiles per phase). Without argument, print a report of the frames already recorded</li>
 <li>sv_profile_csv &lt;file&gt; // Write the recorded frames to &lt;file&gt; in the game directory, one row per frame (tools/bench/report.py reads it)</li>
 <li>sv_profile_reset // Clear the recorded frames and apply a new sv_profile_frames</li>
+<li>sv_parallel_send_stats // Print the number of worker threads and whether the snapshots are encoded in parallel, else why not</li>
 <li>net_thread_stats // Print the network thread's counters: packets received, dropped per reason, ban replies, queue usage</li>
 </ul>
 

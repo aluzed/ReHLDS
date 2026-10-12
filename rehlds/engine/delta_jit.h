@@ -74,11 +74,25 @@ struct deltajitdata_t {
 
 class CDeltaJit;
 
+// Most delta descriptions a game can register (delta.lst has 7)
+const int MAX_DELTA_JITS = 32;
+
+// Fields marked by the last check of a delta description. Each thread has its own
+// (engine_thread_state_t), so that several threads can encode with the same
+// description; the generated code receives it as its third argument.
+struct delta_jit_marks_t {
+	delta_t* delta;	// for the conditional encoder call
+	delta_marked_mask_t markedFieldsMask;
+	delta_marked_mask_t originalMarkedFieldsMask; // mask based on data, before calling the conditional encoder
+	int markedFieldsMaskSize;
+};
+
 class CDeltaJitRegistry {
 private:
 #ifndef REHLDS_FIXES
 	CStaticMap<void*, CDeltaJit*, 4, 64> m_DeltaToJITMap;
 #endif
+	int m_NumJits;
 
 public:
 	CDeltaJitRegistry();
@@ -96,6 +110,11 @@ extern void DELTAJit_SetSendFlagBits(delta_t *pFields, int *bits, int *bytecount
 extern void DELTAJit_SetFieldByIndex(delta_t *pFields, int fieldNumber);
 extern void DELTAJit_UnsetFieldByIndex(delta_t *pFields, int fieldNumber);
 extern qboolean DELTAJit_IsFieldMarked(delta_t* pFields, int fieldNumber);
+
+// Called by the generated code instead of the conditional encoder itself
+extern void DELTAJit_CallConditionalEncoder(delta_t *pFields, const unsigned char *from, const unsigned char *to);
+// While worker threads encode, the conditional encoders (game DLL code) never run concurrently
+extern void DELTAJit_SerialiseConditionalEncoders(bool serialise);
 
 /* Returns original mask, before it was changed by the conditional encoder */
 extern uint64 DELTAJit_GetOriginalMask(delta_t* pFields);

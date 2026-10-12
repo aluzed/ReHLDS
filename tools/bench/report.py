@@ -46,6 +46,7 @@ COUNTERS = [
     "entities_sent",
     "net_thread_drops",
     "net_queue_wait_us",
+    "send_worker_items",
 ]
 
 

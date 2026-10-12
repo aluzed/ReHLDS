@@ -1340,7 +1340,25 @@ void Con_Printf(const char *fmt, ...)
 	Q_vsnprintf(Dest, sizeof(Dest), fmt, va);
 	va_end(va);
 
+	// Hooks and output are main thread only: a worker's text is printed after its work
+	if (!IsMainThread())
+	{
+		ThreadState_DeferConsole(Dest);
+		return;
+	}
+
 	g_RehldsHookchains.m_Con_Printf.callChain(Con_Printf_internal, Dest);
+}
+
+// Con_DPrintf on a worker thread: printed by the main thread after the work
+static void Con_DPrintf_Deferred(const char *fmt, va_list argptr)
+{
+	if (developer.value == 0.0f)
+		return;
+
+	char Dest[4096];
+	Q_vsnprintf(Dest, sizeof(Dest), fmt, argptr);
+	ThreadState_DeferConsole(Dest);
 }
 
 void EXT_FUNC Con_Printf_internal(const char *Dest)
@@ -1405,6 +1423,12 @@ void EXT_FUNC Con_DPrintf(const char *fmt, ...)
 	char Dest[4096];
 	va_list argptr;
 	va_start(argptr, fmt);
+	if (!IsMainThread())
+	{
+		Con_DPrintf_Deferred(fmt, argptr);
+		va_end(argptr);
+		return;
+	}
 	Q_vsnprintf(Dest, sizeof(Dest), fmt, argptr);
 	va_end(argptr);
 
@@ -1430,6 +1454,12 @@ void EXT_FUNC Con_DPrintf(const char *fmt, ...)
 	va_list argptr;
 
 	va_start(argptr, fmt);
+	if (!IsMainThread())
+	{
+		Con_DPrintf_Deferred(fmt, argptr);
+		va_end(argptr);
+		return;
+	}
 	if (developer.value != 0.0f)
 	{
 #ifdef _WIN32

@@ -92,7 +92,8 @@ frame on target servers, epic 4 is re-scoped.
 ## Status and decision gate (2026-10-12)
 
 Done: MT-002, MT-003, MT-101, MT-103, MT-106, MT-302, MT-303, MT-004 (Linux, not in CI),
-MT-701 (review pending); MT-001 except the Windows CI run. MT-702 in progress.
+MT-401 to MT-404, MT-701 (review pending); MT-202 and MT-203 in part; MT-001 except the
+Windows CI run. MT-702 in progress.
 
 Measured on a full server (`clients32`, see
 [`../benchmarks/clients32.md`](../benchmarks/clients32.md)): with the scheduler (MT-101)
@@ -149,6 +150,18 @@ Next: Windows CI build (all the Windows code paths of MT-002, MT-101, MT-302).
 Operator guide: [`../performance-tuning.md`](../performance-tuning.md); every option is in
 `README.md` and `CHANGELOG.md`.
 
+
+### Update: parallel snapshot encoding (epic 4)
+
+Reopened with a heavier benchmark, `clients32-ents` ([`../benchmarks/clients32-ents.md`](../benchmarks/clients32-ents.md)):
+32 load clients that now really play (they used to stay dead spectators, which hid most
+of the encoding cost) and 400 moving entities. There, encoding is the largest part of
+the send (126 µs per frame, 404 µs p99) and the frame exceeds the 1 ms tick at p95.
+
+MT-401 to MT-404 are done: with `-sys_threads 2 +sv_parallel_send 1`, the main thread
+gathers the snapshots from the game DLL and two workers encode them meanwhile;
+`send_messages` drops by 40 % (251 → 152 µs, p99 790 → 498 µs), with byte-identical
+replays. What remains above the tick is game DLL time (player movement, `AddToFullPack`).
 ## Explicit non-goals
 
 * Running physics, `Think`/`Touch`, player movement (`PM_Move`) or any game DLL code in

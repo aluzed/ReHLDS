@@ -33,12 +33,12 @@ ticks stay regular under load.
 
 ## Acceptance criteria
 
-* [ ] Per-destination byte-identical output vs serial (MT-004).
-* [ ] `cs32-ents` scenario: `SV_SendClientMessages` wall time reduced by ≥ 40 % with 4
-      workers (to be revised after MT-002 baseline).
-* [ ] No regression with `sys_threads 0` / `sv_parallel_send 0`.
-* [ ] TSan clean on a 5-minute `cs32` run.
-* [ ] Toggling `sv_parallel_send` at runtime is safe.
+* [x] Byte-identical output vs serial (MT-004), in the same global order.
+* [x] `clients32-ents` scenario: `SV_SendClientMessages` main-thread time −40 % on average
+      (251 → 152 µs), −37 % at p99, with 2 workers.
+* [x] No regression with `sys_threads 0` / `sv_parallel_send 0`.
+* [ ] TSan clean on a 5-minute `cs32` run: TSan cannot run (32-bit engine), Helgrind instead.
+* [x] Toggling `sv_parallel_send` at runtime is safe (read once per frame).
 
 ## Risks
 
@@ -50,3 +50,26 @@ ticks stay regular under load.
 ## Out of scope
 
 * Parallel gather (impossible without game DLL cooperation).
+
+## Status
+
+Done, with a different split than planned: **transmit stays on the main thread**, after
+the encode, in client order; only the encode runs on the workers. The output is then
+byte-identical in global order too, and `Netchan_Transmit`, the network replay and the
+profiler counters stay single-threaded. Transmit is ≈ 15 µs per frame.
+
+* `rehlds/threading/worker_pool.{h,cpp}` (MT-202): fixed threads, batches whose items
+  are published one by one while the main thread prepares the next, main thread
+  participating, spin then condition variable.
+* `rehlds/parallel_send.{h,cpp}`: `-sys_threads N|auto` (≤ 8), `sv_parallel_send`,
+  `sys_threads_spin_us` (default 0), `sv_parallel_send_stats`; profiler counter
+  `send_worker_items`.
+* Pipelined: the workers are woken by the first gathered snapshot of the frame and
+  encode each snapshot while the main thread gathers the next one, which hides their
+  wake-up; there is no "gather all, then encode in parallel" step.
+* Results: [`../benchmarks/clients32-ents.md`](../benchmarks/clients32-ents.md).
+* Helgrind (`tools/bench/race_check.sh`, now with 2 encoding threads and playing
+  clients): 0 report in engine code once the pool and the encoder lock are annotated.
+  One of three runs crashed under Valgrind before any client connected, with a null
+  access in the game DLL's `StartFrame`, before any snapshot was encoded; not reproduced
+  since, cause unknown. Never seen outside Valgrind.

@@ -183,12 +183,15 @@ set(ENGINE_SRCS
 	rehlds/main.cpp
 	rehlds/net_receive_thread.cpp
 	rehlds/net_replay.cpp
+	rehlds/parallel_send.cpp
 	rehlds/platform.cpp
 	rehlds/public_amalgamation.cpp
 	rehlds/rehlds_api_impl.cpp
 	rehlds/rehlds_interfaces_impl.cpp
 	rehlds/rehlds_messagemngr_impl.cpp
 	rehlds/rehlds_security.cpp
+	rehlds/thread_state.cpp
+	rehlds/threading/worker_pool.cpp
 )
 
 set(UNITTESTS_SRCS
@@ -204,6 +207,7 @@ set(UNITTESTS_SRCS
 	unittests/spsc_ring_tests.cpp
 	unittests/struct_offsets_tests.cpp
 	unittests/sys_tests.cpp
+	unittests/worker_pool_tests.cpp
 	unittests/TestRunner.cpp
 	unittests/tmessage_tests.cpp
 	unittests/unicode_tests.cpp

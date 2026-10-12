@@ -4260,6 +4260,17 @@ void SV_EmitEvents_internal(client_t *cl, packet_entities_t *pack, sizebuf_t *ms
 
 	es = &cl->events;
 
+	// The snapshot being encoded took the queue at gather time: events queued since
+	// then go to the next snapshot
+	client_snapshot_t *snapshot = ThreadState()->encodingSnapshot;
+	if (snapshot && snapshot->client == cl)
+	{
+		if (!snapshot->hasEvents)
+			return;
+
+		es = &snapshot->events;
+	}
+
 	for (ev = 0; ev < MAX_EVENT_QUEUE; ev++)
 	{
 		info = &es->ei[ev];
@@ -4509,8 +4520,6 @@ int SV_PointLeafnum(vec_t *p)
 void TRACE_DELTA(char *fmt, ...)
 {
 }
-
-deltacallback_t g_svdeltacallback;
 
 void SV_SetCallback(int num, qboolean remove, qboolean custom, int *numbase, qboolean full, int offset)
 {
@@ -4953,15 +4962,13 @@ void SV_EmitPings(client_t *client, sizebuf_t *msg) {
 	g_RehldsHookchains.m_SV_EmitPings.callChain(SV_EmitPings_hook, GetRehldsApiClient(client), msg);
 }
 
-// Snapshot being encoded, whose pings were computed by the gather phase
-static const client_snapshot_t *g_pEncodingSnapshot = NULL;
-
 void EXT_FUNC SV_EmitPings_internal(client_t *client, sizebuf_t *msg)
 {
 	int ping;
 	int packet_loss;
 
-	const client_snapshot_t *snapshot = g_pEncodingSnapshot;
+	// The snapshot being encoded has the pings computed by the gather phase
+	const client_snapshot_t *snapshot = ThreadState()->encodingSnapshot;
 	if (snapshot && (snapshot->client != client || !snapshot->sendPings))
 		snapshot = NULL;
 
@@ -5142,6 +5149,33 @@ void SV_GatherEntities(client_snapshot_t *snapshot)
 			snapshot->packetLoss[i] = packet_loss;
 		}
 	}
+
+	// The events queued until now are emitted by the encode phase, from this copy;
+	// the client's queue is left as SV_EmitEvents_internal leaves it
+	snapshot->hasEvents = FALSE;
+	for (int ev = 0; ev < MAX_EVENT_QUEUE; ev++)
+	{
+		if (client->events.ei[ev].index != 0)
+		{
+			snapshot->hasEvents = TRUE;
+			break;
+		}
+	}
+
+	if (snapshot->hasEvents)
+	{
+		Q_memcpy(&snapshot->events, &client->events, sizeof(snapshot->events));
+		for (int ev = 0; ev < MAX_EVENT_QUEUE; ev++)
+		{
+			event_info_t *info = &client->events.ei[ev];
+			if (info->index == 0)
+			{
+				info->packet_index = -1;
+				info->entity_index = -1;
+			}
+			info->index = 0;
+		}
+	}
 }
 
 // Encode phase of the packet entities, events and pings
@@ -5153,11 +5187,7 @@ void SV_EncodeEntities(const client_snapshot_t *snapshot, sizebuf_t *msg)
 	SV_EmitPacketEntities(client, pack, msg);
 	SV_EmitEvents(client, pack, msg);
 	if (snapshot->sendPings)
-	{
-		g_pEncodingSnapshot = snapshot;
 		SV_EmitPings(client, msg);
-		g_pEncodingSnapshot = NULL;
-	}
 }
 
 void SV_CleanupEnts(void)
@@ -5211,13 +5241,18 @@ void SV_GatherClientDatagram(client_snapshot_t *snapshot)
 	g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
 }
 
-// Encode phase of a client's datagram, into snapshot->msg
+// Encode phase of a client's datagram, into snapshot->msg. Runs on worker threads
+// with sv_parallel_send: only reads the snapshot, the client's frames and server
+// state that does not change during the send.
 void SV_EncodeClientDatagram(client_snapshot_t *snapshot)
 {
 	client_t *client = snapshot->client;
 	sizebuf_t *msg = &snapshot->msg;
+	engine_thread_state_t *threadState = ThreadState();
 
-	g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
+	// The game DLL's conditional encoders ask for the current player
+	threadState->encodingClient = client;
+	threadState->encodingSnapshot = snapshot;
 
 	msg->buffername = "Client Datagram";
 	msg->data = snapshot->buf;
@@ -5260,7 +5295,8 @@ void SV_EncodeClientDatagram(client_snapshot_t *snapshot)
 	DELTA_ClearTimeBaseOverride();
 #endif
 
-	g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
+	threadState->encodingClient = NULL;
+	threadState->encodingSnapshot = NULL;
 }
 
 // Last phase, on the main thread: diagnostics and transmission
@@ -5292,7 +5328,9 @@ qboolean SV_SendClientDatagram(client_t *client)
 	snapshot.client = client;
 	snapshot.datagram = TRUE;
 	SV_GatherClientDatagram(&snapshot);
+	g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
 	SV_EncodeClientDatagram(&snapshot);
+	g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
 	SV_TransmitClientDatagram(&snapshot);
 	return TRUE;
 }
@@ -5479,6 +5517,9 @@ void SV_SendClientMessages(void)
 	gatherFirst = sv_parallel_send.value != 0.0f;
 #endif
 	int numSnapshots = 0;
+	// The worker threads encode each snapshot as soon as it is gathered
+	bool parallel = false;
+	bool parallelChecked = false;
 
 	for (int i = 0; i < g_psvs.maxclients; i++)
 	{
@@ -5536,10 +5577,19 @@ void SV_SendClientMessages(void)
 				g_FrameProfiler.AddCounter(FPC_CLIENTS_SENT, 1);
 				if (gatherFirst)
 				{
+					if (!parallelChecked)
+					{
+						parallel = ParallelSend_Begin(g_ClientSnapshots);
+						parallelChecked = true;
+					}
+
 					client_snapshot_t *snapshot = &g_ClientSnapshots[numSnapshots++];
 					snapshot->client = cl;
 					snapshot->datagram = TRUE;
 					SV_GatherClientDatagram(snapshot);
+
+					if (parallel)
+						ParallelSend_Publish(numSnapshots);
 				}
 				else
 					SV_SendClientDatagram(cl);
@@ -5560,13 +5610,27 @@ void SV_SendClientMessages(void)
 	{
 		client_t *lastClient = host_client;
 
-		for (int i = 0; i < numSnapshots; i++)
+		if (parallel)
 		{
-			client_snapshot_t *snapshot = &g_ClientSnapshots[i];
-			if (snapshot->datagram)
+			// Snapshots published after the last datagram are empty packets
+			ParallelSend_Publish(numSnapshots);
+
+			g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
+			ParallelSend_Finish();
+			g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
+		}
+		else
+		{
+			for (int i = 0; i < numSnapshots; i++)
 			{
-				host_client = snapshot->client;
-				SV_EncodeClientDatagram(snapshot);
+				client_snapshot_t *snapshot = &g_ClientSnapshots[i];
+				if (snapshot->datagram)
+				{
+					host_client = snapshot->client;
+					g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
+					SV_EncodeClientDatagram(snapshot);
+					g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
+				}
 			}
 		}
 

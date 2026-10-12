@@ -51,10 +51,12 @@ so that the encode phase can run on the worker pool.
 
 ## Acceptance criteria
 
-* [ ] Unit test (`rehlds/unittests/delta_tests.cpp` extended): N threads encoding
-      different entity pairs with the same descriptor give the same bits as serial.
-* [ ] With CS 1.6 (ReGameDLL and original `mp.so`) the replay output is identical.
-* [ ] JIT and non-JIT builds both pass.
+* [x] Unit test: N threads encoding different entity pairs with the same descriptor
+      give the same bits as serial (`unittests/worker_pool_tests.cpp`, with a
+      conditional encoder that changes the marks).
+* [x] With CS 1.6 (ReGameDLL) the replay output is identical. Original `mp.so` not tested.
+* [ ] JIT and non-JIT builds both pass: parallel encoding requires the JIT (the non-JIT
+      path marks fields in the shared descriptor); non-JIT builds encode serially.
 * [ ] No `delta_t` field written during the encode phase (checked by a debug build that
       write-protects descriptors with `mprotect` during the parallel section).
 
@@ -68,3 +70,24 @@ so that the encode phase can run on the worker pool.
 ## Out of scope
 
 * Changing delta.lst or the wire encoding.
+
+## Status
+
+Done for the JIT path, which every build uses (`REHLDS_JIT`):
+
+* `rehlds/thread_state.h`: per-thread engine state behind one initial-exec TLS pointer:
+  bit writer (`bfwrite`), delta header callback, time window override, the client and
+  snapshot being encoded (`PF_GetCurrentPlayer` answers the encoded client to the
+  encoders), delta field marks, deferred console output.
+* `engine/delta_jit.cpp`: the marks moved from `CDeltaJit` to `delta_jit_marks_t`, one
+  per thread and description; the generated code receives the thread's marks.
+* Conditional encoders (option 2 of the scope, without opt-in): the generated code calls
+  them through `DELTAJit_CallConditionalEncoder`, which takes a spinlock while workers
+  encode. Game DLL encoder code then runs on worker threads but never concurrently with
+  itself, which also covers their lazy `static` initialisation. The ReGameDLL encoders
+  only read their arguments and call the engine (`ENGINE_CURRENT_PLAYER`,
+  `DELTA_(UN)SETBYINDEX`), which now uses the thread's state.
+* `Con_Printf` / `Con_DPrintf` on a worker are deferred and printed by the main thread
+  after the encode. `Sys_Error` on a worker (overflow of a fixed buffer) is still fatal
+  from that thread.
+* Not done: `mprotect` of the descriptors during the parallel section.

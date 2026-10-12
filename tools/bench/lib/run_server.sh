@@ -34,6 +34,9 @@ ENTITIES=0
 # CLIENTS_ALIVE=1: the load clients join a team and spawn as players (loadclient.py
 # --play); by default they stay dead, as in the first reports
 CLIENTS_ALIVE=0
+# Console commands sent once the map is loaded, and at the end, separated by ';'
+SERVER_COMMANDS=
+FINAL_COMMANDS=
 . "$scenario"
 
 cpu_ticks() {
@@ -81,6 +84,9 @@ send() {
 sleep 8
 send "bot_join_after_player 0"
 send "bot_quota $BOTS"
+if [ -n "$SERVER_COMMANDS" ]; then
+	send "$SERVER_COMMANDS"
+fi
 
 # HLTV proxies are real network clients that receive full snapshots
 for i in $(seq 1 "$HLTV"); do
@@ -132,6 +138,10 @@ sleep 2
 send "sv_profile_csv bench_profile.csv"
 send status
 send net_thread_stats
+send sv_parallel_send_stats
+if [ -n "$FINAL_COMMANDS" ]; then
+	send "$FINAL_COMMANDS"
+fi
 sleep 2
 send quit
 exec 3>&-

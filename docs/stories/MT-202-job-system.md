@@ -57,8 +57,13 @@ fan-out, so that threaded stories reuse one consistent implementation.
 ## Status
 
 Partly done with MT-302: `rehlds/rehlds/threading/spsc_ring.h` (`SpscRing`, unit tests
-in `rehlds/unittests/spsc_ring_tests.cpp`), `pthread` linked. Worker pool, `MpscQueue`,
-`IsMainThread` and the configuration are still to do.
+in `rehlds/unittests/spsc_ring_tests.cpp`), `pthread` linked.
+
+With MT-403: `rehlds/rehlds/threading/worker_pool.{h,cpp}` (`CWorkerPool`: batches with
+incremental publication instead of `ParallelFor`, main thread participating, spin then
+condition variable; unit test `WorkerPool::EveryItemRunsOnce`), `IsMainThread()`
+(`rehlds/thread_state.h`), `-sys_threads N|auto`. `MpscQueue`, `ASSERT_MAIN_THREAD()` and
+`-sys_affinity` are still to do.
 
 ## Out of scope
 

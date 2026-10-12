@@ -42,6 +42,7 @@ Same machine as the other reports.
 | `replay`: 8 load clients and 2 HLTV proxies | **identical** (23 556 packets), twice | **different**: 9 of 10 destinations |
 | `replay` recorded with `-netthread +sys_scheduler 1 +sv_rehlds_snapshot_spread 1` | **identical** (25 423 packets) | — |
 | `bots20-hltv8`: 20 bots and 8 HLTV proxies | **different** from frame ≈ 21 000 | — |
+| `replay` with playing clients, recorded with the serial engine, replayed with `-sys_threads 2 +sv_parallel_send 1` (also 3 threads, `sv_rehlds_local_gametime 1`) | **identical** | — |
 
 * A replay of a session without bots reproduces the recorded session exactly: the same
   bytes as the live server, to every destination.

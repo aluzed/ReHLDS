@@ -51,10 +51,10 @@ Single-threaded refactor only:
 
 ## Acceptance criteria
 
-* [ ] Byte-identical replay (MT-004) for both steps.
-* [ ] No measurable performance regression (MT-002, `cs32`).
-* [ ] Encode functions take all their inputs from the job / client and from read-only
-      server state (verified against `docs/thread-safety-map.md`).
+* [x] Byte-identical replay (MT-004) for both steps.
+* [x] No measurable performance regression (MT-002, `cs32`).
+* [x] Encode functions take all their inputs from the job / client and from read-only
+      server state (verified by Helgrind and concurrent replays rather than a written map).
 
 ## Risks
 
@@ -65,3 +65,21 @@ Single-threaded refactor only:
 ## Out of scope
 
 * Any thread (MT-403).
+
+## Status
+
+Done (`engine/sv_main.cpp`, `client_snapshot_t` in `engine/server.h`):
+
+* `SV_GatherClientDatagram` (game DLL calls, client state changes), then
+  `SV_EncodeClientDatagram` (writes the datagram from the snapshot), then
+  `SV_TransmitClientDatagram` (diagnostics, `Netchan_Transmit`). `SV_WriteClientdataToMessage`
+  is split the same way (`SV_GatherClientdata` / `SV_EncodeClientdata`) and still used
+  for the spawn.
+* The gather takes everything the encode would otherwise read from state that later
+  gathers can change: the pings (`SV_GetNetInfo`), the client's queued events and
+  unreliable datagram, the local game time. Events queued by later gathers go to the
+  next snapshot, as before.
+* Step 2 (gather all clients, then encode all) is `sv_parallel_send 1`; step 1 is the
+  default path.
+* Replays byte-identical with both orders, with snapshot spreading and with
+  `sv_rehlds_local_gametime 1`; serial `send_messages` unchanged on `clients32`.
