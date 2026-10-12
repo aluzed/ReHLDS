@@ -33,3 +33,8 @@ default, so that we ship stability improvements and not new crashes.
 * [ ] Validation report in `docs/benchmarks/field-validation.md`.
 * [ ] Defaults decided and applied.
 * [ ] Upstream PRs opened for the generic improvements (if desired).
+
+## Status
+
+In progress. Staging server ready (`tools/staging/server.sh`), sessions and results in
+[`../benchmarks/field-validation.md`](../benchmarks/field-validation.md).
