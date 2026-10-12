@@ -39,6 +39,9 @@ public:
 
 private:
 	void WaitUntil(uint64 deadline);
+	// sys_wake_on_packet (MT-102): reads the packets the network thread queues
+	// until the deadline, as they arrive, instead of at the next tick
+	void ReadPacketsUntil(uint64 deadline);
 	void SleepUntil(uint64 deadline);
 	void ApplyProcessSettings();
 

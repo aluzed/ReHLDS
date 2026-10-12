@@ -5,7 +5,7 @@ with its default settings, which behaves like upstream ReHLDS (every new option 
 default). "After" is the fork with the recommended settings:
 
 ```
--netthread -sys_threads 2 +sys_ticrate 1000 +sys_scheduler 1 +sv_rehlds_snapshot_spread 1 +sv_parallel_send 1
+-netthread +sys_ticrate 1000 +sys_scheduler 1 +sv_rehlds_snapshot_spread 1
 ```
 
 Same machine for every run: Ryzen 9 3950X, Linux 7.0, `powersave` governor, no CPU
@@ -49,26 +49,28 @@ scheduler and snapshot spreading.
 
 | | Before | After | Change |
 |---|---|---|---|
-| Server FPS | 607.2 | 999.6 | +65 %, exact |
-| Tick interval p99 | 3497 µs | 1735 µs | −50 % |
-| Tick jitter (stddev) | 617 µs | 199 µs | ÷3.1 |
-| Frame avg / p99 | 588 / 2429 µs | 374 / 1701 µs | −36 % / −30 % |
-| Snapshot send, main thread, avg / p99 | 319 / 1770 µs | 177 / 670 µs | −45 % / −62 % |
-| Snapshot encoding on the main thread, avg / p99 | 164 / 943 µs | 73 / 265 µs | −55 % / −72 % |
-| Main thread CPU | 35.9 % | 37.9 % | ≈ for +65 % frames |
-| Whole process CPU (cores used) | 36.5 % | 69.5 % | +0.33 core (2 encoding threads) |
-| Snapshots per client | 59.7 /s | 64.5 /s | ≈ (limited by `sv_maxrate`) |
+| Server FPS | 760.2 | 1000.0 | +32 %, exact |
+| Tick interval p99 | 2286 µs | 1249 µs | −45 % |
+| Tick jitter (stddev) | 287 µs | 75 µs | ÷3.8 |
+| Frame avg / p99 | 257 / 1224 µs | 200 / 1186 µs | −22 % / −3 % |
+| Snapshot send avg / p99 | 62 / 347 µs | 49 / 285 µs | −21 % / −18 % |
+| Main thread CPU | 19.9 % | 20.5 % | ≈ for +32 % frames |
+| Whole process CPU | 20.4 % | 23.3 % | +3 % (network thread) |
+| Snapshots per client | 11.8 /s | 12.2 /s | ≈ (limited by `sv_maxrate`) |
+| Input latency avg | 45.9 ms | 44.8 ms | ≈ (half the snapshot interval) |
 
-"After" is the average of three runs. Most of the gain comes from the scheduler and
-snapshot spreading: with them but without the encoding threads, the frame p99 is the
-same (1701 µs) and the send takes 203 / 933 µs. The encoding threads take a quarter off
-the send phase and its peaks for a third of a core; with Counter-Strike they encode once
-every snapshot is gathered, see [`../performance-tuning.md`](../performance-tuning.md).
+"After" is the recommended settings (network thread, scheduler, snapshot spreading),
+averages of two to three runs. The snapshots carry ≈ 150 moving entities and exceed
+`sv_maxrate 100000`: each client gets about 12 snapshots/s in both cases, and waits on
+average half that interval for the server's answer to a command. The frame p99 is game
+DLL time (player movement, `AddToFullPack`), which runs on the main thread by design;
+`sys_wake_on_packet 1` takes the player movement out of the tick (frame p99 385 µs,
+tick interval p99 1144 µs, see [`../performance-tuning.md`](../performance-tuning.md)).
+The encoding threads (`sv_parallel_send`) gain next to nothing here.
 
-The snapshots carry ≈ 150 entities and exceed `sv_maxrate 100000`: the clients get what
-their rate allows in both cases. The frame p99 still exceeds the 1 ms tick: it is the
-game DLL's player movement and `AddToFullPack`, which the engine cannot move off the
-main thread.
+These numbers replace earlier ones measured with a load client that did not acknowledge
+the server's split snapshots: the server then sent much bigger snapshots than to real
+clients (see [`clients32-ents.md`](clients32-ents.md)).
 
 ## Full server under a query flood: 50 000 packets/s from 4096 addresses ([`flood.md`](flood.md))
 
@@ -90,9 +92,9 @@ sees it.
 
 | | Before | After |
 |---|---|---|
-| Threads used by the server | 1 (+ Steam) | 1 game loop + 1 network thread + 2 encoding threads |
+| Threads used by the server | 1 (+ Steam) | 1 game loop + 1 network thread |
 | Extra CPU, quiet server | – | ≈ 0 (the threads sleep) |
-| Extra CPU, heavy server | – | ≈ 0.33 core (encoding threads, which wait while the main thread gathers) |
+| Extra CPU, heavy server | – | ≈ 0.03 core (network thread) |
 | Extra CPU, query flood | – | ≈ 0.25 core (filtering the flood) |
 | Output to the clients | – | byte-identical for the same inputs (replays) |
 | Plugins | – | game DLL, Metamod, AMX Mod X and ReAPI hooks still on the main thread |

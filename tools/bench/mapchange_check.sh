@@ -5,6 +5,7 @@
 # exercise (race_check.sh): it runs one thread at a time.
 #
 #   tools/bench/mapchange_check.sh <engine label> [cycles]
+#   BENCH_SERVER_ARGS adds server arguments, as with run.sh
 set -euo pipefail
 . "$(dirname "$0")/lib/common.sh"
 
@@ -23,7 +24,7 @@ log "changing the map $cycles times with engine '$label' (about $((cycles * 55 /
 status=0
 in_container "$BENCH_ROOT/lib/mapchange_server.sh" "$HLDS_DIR" "$out" "$cycles" \
 	-netthread -sys_threads 2 +sys_ticrate 1000 +sys_scheduler 1 +sv_rehlds_snapshot_spread 1 +sv_parallel_send 1 \
-	|| status=$?
+	${BENCH_SERVER_ARGS:-} || status=$?
 
 grep -A1 "^[0-9]* worker threads" "$out/server.log" | tail -2 || true
 if [ "$status" = 0 ]; then

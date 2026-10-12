@@ -21,8 +21,9 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `-netthread` | MT-302 | off | on | Network thread, the tick no longer sees floods |
 | `-netthread_queue` | MT-302 | 1024 | 1024 | Queue between the network thread and the game loop |
 | `net_thread_filter` | MT-303 | 1 | 1 | Early filtering on the network thread |
-| `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers with spare cores: 2, 1 | Snapshots encoded on worker threads |
+| `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | 0, 0 | Snapshots encoded on worker threads, see below |
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
+| `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
 
@@ -147,13 +148,27 @@ Network thread: running, queue 0/1024 packets (max 58), filter on
 loop was stalled for longer than the queue holds (a long map change, a plugin blocking):
 raise `-netthread_queue` (64–16384, rounded to a power of two).
 
+## Reading packets on arrival
+
+`sys_wake_on_packet 1` (with `sys_scheduler 1` and `-netthread`) wakes the main thread
+when packets arrive between two ticks and runs the client commands right away, instead
+of at the next tick. Physics and the snapshots stay on the tick.
+
+It does not lower the latency players see: a command that arrives between two ticks is in
+the next tick's snapshots either way, and a player waits on average half their snapshot
+interval (5 ms at 100 snapshots/s) for the server's answer. What it does is take the
+client commands, which run the game DLL's player movement, out of the tick: on the heavy
+benchmark the frame p99 drops from 1186 to 385 µs and the tick interval p99 from 1249 to
+1144 µs, for about 3 % of a core
+([`stories/MT-102-wake-on-packet.md`](stories/MT-102-wake-on-packet.md)). Worth trying on
+a server whose ticks run late because of player movement; nothing to gain otherwise.
+
 ## Many players and entities: parallel snapshot encoding
 
-Each snapshot is built in two parts: the game DLL decides what each client sees
-(`AddToFullPack`, the gather), then the engine delta-encodes it (the encode). On a full
-server with many entities, encoding is the largest part of the send: about 50 µs per
-snapshot of 150 entities.
+**Not recommended for Counter-Strike: it costs CPU and gains next to nothing.**
 
+Each snapshot is built in two parts: the game DLL decides what each client sees
+(`AddToFullPack`, the gather), then the engine delta-encodes it (the encode).
 `-sys_threads 2 +sv_parallel_send 1` moves the encoding to two worker threads. The main
 thread still gathers every snapshot, in the same order as before, the workers and the
 main thread encode them, and the main thread then transmits the datagrams in client
@@ -173,25 +188,20 @@ averages of three runs ([`benchmarks/clients32-ents.md`](benchmarks/clients32-en
 
 | | Serial | 2 workers |
 |---|---|---|
-| `send_messages` avg / p99 | 203 / 933 µs | 177 / 670 µs |
-| Frame avg / p99 | 396 / 1701 µs | 374 / 1701 µs |
-| Tick jitter (stddev) | 216 µs | 199 µs |
-| Process CPU | 40.6 % | 69.5 % |
+| `send_messages` avg / p99 | 49 / 285 µs | 47 / 233 µs |
+| Frame avg / p99 | 200 / 1184 µs | 200 / 1199 µs |
+| Tick interval p99 | 1245 µs | 1255 µs |
+| Process CPU | 23.3 % | 30.7 % |
 
-The gain is on the send phase, its peaks most of all; the frame peaks of this benchmark
-are game DLL time (player movement, `AddToFullPack`) and do not change. For about a third
-of a core, it is worth it only with spare cores.
+Real clients acknowledge the snapshots, and the engine encodes each one as a delta from
+the last one they received: the encoding is small, even with many entities. Earlier
+measurements with a load client that did not acknowledge them properly showed a gain
+four times larger, on snapshots that real clients never cause. It may help a mod whose
+snapshots really are big and change a lot every tick; measure before using it.
 
-When to use it:
-
-* Servers whose snapshots are big: many players in sight of each other, many visible
-  entities (deathmatch, mods with many props or projectiles). On a 32-player server with
-  ordinary rounds the encoding is ≈ 15 µs per frame, and there is nothing to gain.
 * Two workers are enough: with snapshot spreading, a frame has 2–3 snapshots. A third
   one only adds CPU. `-sys_threads auto` starts one per CPU but one, up to 8, which is
   more than useful.
-* Count the workers in the cores per instance: they use ≈ 12 % of a core each on the
-  heavy benchmark, mostly encoding moved off the main thread.
 * `sys_threads_spin_us` makes the workers spin between frames instead of sleeping. The
   workers are already woken while the first snapshot of a frame is gathered, so it only
   costs CPU; leave it at 0.

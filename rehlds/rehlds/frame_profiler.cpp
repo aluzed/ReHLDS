@@ -64,6 +64,7 @@ namespace
 		"net_thread_drops",
 		"net_queue_wait_us",
 		"send_worker_items",
+		"early_read_us",
 	};
 
 	struct ColumnStats

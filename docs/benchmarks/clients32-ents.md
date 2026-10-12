@@ -1,5 +1,8 @@
 # Full server with many entities: baseline for epic 4
 
+> The figures after the correction section below were measured with a load client that
+> mishandled split snapshots; see that section for the corrected ones.
+
 `clients32-ents` scenario: the 32 protocol load clients of `clients32`, but **playing**
 (they join a team and spawn), plus 400 entities flying around them
 (`tools/bench/plugins/bench_entities.sma`, loaded through Metamod-R and AMX Mod X). Every
@@ -10,6 +13,39 @@ packet entities per snapshot, up to the 256 limit. `sys_ticrate 1000`,
 This is the load epic 4 (parallel snapshot encoding) targets: on the plain `clients32`
 scenario, the remaining send cost was too small to be worth parallelising
 ([`clients32.md`](clients32.md)).
+
+## Correction: the load client mishandled split snapshots
+
+Snapshots over 1400 bytes are sent as several split UDP packets (`NET_SendLong`). Until
+MT-102, the load client took each part for a netchan packet: its incoming sequence
+jumped, it dropped every later packet as out of order and acknowledged a stale frame. The
+server then delta-encoded against frames the client did not have, or sent full
+snapshots: much more encoding than for real clients, and the snapshot rates below
+counted the parts (about 60 per second instead of 12). The sections "Baseline",
+"Parallel encoding" and "After the Metamod fix" were measured that way and overstate the
+encoding cost and the gain of the encoding threads.
+
+With the load client fixed (three runs each, `-netthread +sys_scheduler 1
++sv_rehlds_snapshot_spread 1`):
+
+| | Default engine | Recommended settings | + 2 encoding threads | + `sys_wake_on_packet 1` |
+|---|---|---|---|---|
+| Server FPS | 760.2 | 1000.0 | 1000.0 | 1000.0 |
+| Tick interval p99 | 2286 µs | 1249 µs | 1255 µs | 1144 µs |
+| Tick jitter (stddev) | 287 µs | 75 µs | 75 µs | 72 µs |
+| Frame avg / p99 | 257 / 1224 µs | 200 / 1186 µs | 200 / 1199 µs | 121 / 385 µs |
+| `send_messages` avg / p99 | 62 / 347 µs | 49 / 285 µs | 47 / 233 µs | 50 / 285 µs |
+| `encode` on the main thread, avg / p99 | – | 24 / 151 µs | 21 / 101 µs | – |
+| Process CPU | 20.4 % | 23.3 % | 30.7 % | 26.1 % |
+| Snapshots per client | 11.8 /s | 12.2 /s | 12.2 /s | 12.2 /s |
+| Input latency avg / p99 | 45.9 / 109 ms | 44.8 / 105 ms | – | 44.6 / 105 ms |
+
+* The snapshots exceed `sv_maxrate 100000`: each client gets about 12 per second, and
+  waits on average half that interval for the answer to a command.
+* The send costs 49 µs per frame: the encoding threads save 2 µs on average and 50 µs at
+  p99 for 7 % of a core. Not worth it.
+* The frame p99 is player movement (`SV_ExecuteClientMessage`), which
+  `sys_wake_on_packet 1` runs between the ticks (MT-102).
 
 ## Load clients were dead in the earlier reports
 

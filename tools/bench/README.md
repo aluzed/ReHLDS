@@ -99,15 +99,17 @@ BENCH_SERVER_ARGS="-netthread +sys_scheduler 1 +sv_rehlds_snapshot_spread 1" too
 ## Protocol load client
 
 `loadclient.py` (Python 3, no dependency) connects fake players to the server with the
-real GoldSrc protocol: challenge, `connect`, netchan with reliable acknowledgements and
-bzip2 fragment reassembly, sign-on (`new`, `sendres`, `spawn`, `sendents`), team join,
+real GoldSrc protocol: challenge, `connect`, netchan with reliable acknowledgements,
+bzip2 fragment reassembly and split datagram reassembly (snapshots over 1400 bytes), sign-on (`new`, `sendres`, `spawn`, `sendents`), team join,
 then `clc_move` at `CLIENT_CMDRATE` with moving players and `clc_delta` acknowledgements.
 Server packets are only decoded during sign-on; in game the netchan header is enough, so
 one process drives 32 players. Reliable messages made only of prints (AMX Mod X prints
 to clients during the sign-on) are skipped.
 
 It records the interval between server packets of each client over the profiling window
-(`clients.json`), which the report shows as the client-perceived snapshot rate and jitter.
+(`clients.json`), which the report shows as the client-perceived snapshot rate and jitter,
+and the input latency: for every command, the time until the first server packet that
+acknowledges it, i.e. the wait for the server's tick and for the client's next snapshot.
 
 The server runs with `sv_lan 1` (the Steam ticket is random), `mp_consistency 0` and
 `sv_rehlds_maxclients_from_single_ip` raised, all set by `run_server.sh` when `CLIENTS` > 0.

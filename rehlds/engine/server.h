@@ -668,6 +668,7 @@ void SV_CheckForRcon(void);
 qboolean SV_IsSimulating(void);
 void SV_CheckMapDifferences(void);
 void SV_Frame();
+bool SV_ReadPacketsBetweenFrames();
 void SV_Frame_Internal();
 void SV_Drop_f(void);
 void SV_RegisterDelta(char *name, char *loadfile);

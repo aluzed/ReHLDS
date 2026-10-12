@@ -40,6 +40,7 @@ enum FrameProfilerCounter
 	FPC_NET_THREAD_DROPS,     // packets dropped by the network thread (-netthread)
 	FPC_NET_QUEUE_WAIT_US,    // time spent in the network thread's queue, summed over packets
 	FPC_SEND_WORKER_ITEMS,    // snapshots encoded by the worker threads (sv_parallel_send)
+	FPC_EARLY_READ_US,        // packets read between the previous frame and this one (sys_wake_on_packet)
 
 	FPC_COUNT
 };

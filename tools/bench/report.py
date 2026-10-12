@@ -47,6 +47,7 @@ COUNTERS = [
     "net_thread_drops",
     "net_queue_wait_us",
     "send_worker_items",
+    "early_read_us",
 ]
 
 
@@ -211,6 +212,8 @@ def main():
             print(f"| Snapshots per client | {client_cell('snapshot_rate_per_client')} /s |")
             print(f"| Snapshot interval p50 / p99 | {client_cell('interval_ms_p50')} / {client_cell('interval_ms_p99')} ms |")
             print(f"| Snapshot interval jitter (stddev) | {client_cell('interval_ms_stddev')} ms |")
+        if "input_latency_ms_avg" in c:
+            print(f"| Input latency avg / p50 / p99 | {client_cell('input_latency_ms_avg')} / {client_cell('input_latency_ms_p50')} / {client_cell('input_latency_ms_p99')} ms |")
         print()
 
     print("| Time (us) | avg | p50 | p95 | p99 | max |")

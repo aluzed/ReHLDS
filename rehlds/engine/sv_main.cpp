@@ -8633,6 +8633,21 @@ void SV_CheckMapDifferences(void)
 	}
 }
 
+// sys_wake_on_packet (MT-102): reads the packets that arrive while the scheduler
+// waits for the next tick, so that the client commands run on arrival instead of at
+// the tick. Physics and the snapshots stay on the tick. Returns false when no server
+// is running.
+bool SV_ReadPacketsBetweenFrames()
+{
+	if (!g_psv.active)
+		return false;
+
+	uint64 start = Sys_MonotonicNs();
+	SV_ReadPackets();
+	g_FrameProfiler.AddCounter(FPC_EARLY_READ_US, (int)((Sys_MonotonicNs() - start) / 1000));
+	return true;
+}
+
 void SV_Frame()
 {
 	g_RehldsHookchains.m_SV_Frame.callChain(SV_Frame_Internal);

@@ -12,6 +12,7 @@
 cvar_t sys_scheduler = { "sys_scheduler", "0", 0, 0.0f, nullptr };
 cvar_t sys_scheduler_slice = { "sys_scheduler_slice", "100", 0, 100.0f, nullptr };
 cvar_t sys_spin_us = { "sys_spin_us", "0", 0, 0.0f, nullptr };
+cvar_t sys_wake_on_packet = { "sys_wake_on_packet", "0", 0, 0.0f, nullptr };
 
 CFrameScheduler g_FrameScheduler;
 
@@ -75,6 +76,7 @@ void CFrameScheduler::Init()
 	Cvar_RegisterVariable(&sys_scheduler);
 	Cvar_RegisterVariable(&sys_scheduler_slice);
 	Cvar_RegisterVariable(&sys_spin_us);
+	Cvar_RegisterVariable(&sys_wake_on_packet);
 }
 
 void CFrameScheduler::Shutdown()
@@ -171,10 +173,43 @@ void CFrameScheduler::WaitUntil(uint64 deadline)
 	uint64 spin = (uint64)(ClampValue(sys_spin_us.value, 0.0f, MAX_SPIN_US) * 1000.0f);
 
 	if (deadline > spin)
+	{
+		if (sys_wake_on_packet.value != 0.0f && g_NetReceiveThread.IsRunning())
+			ReadPacketsUntil(deadline - spin);
+
 		SleepUntil(deadline - spin);
+	}
 
 	while (Sys_MonotonicNs() < deadline)
 		_mm_pause();
+}
+
+void CFrameScheduler::ReadPacketsUntil(uint64 deadline)
+{
+	for (;;)
+	{
+		if (g_NetReceiveThread.HasPackets())
+		{
+			// No server running (between maps): the queue waits for the next frame
+			if (!SV_ReadPacketsBetweenFrames())
+				return;
+
+			continue;
+		}
+
+		uint64 now = Sys_MonotonicNs();
+		if (now >= deadline)
+			return;
+
+#ifdef _WIN32
+		// The wake event has a millisecond timeout: the high resolution timer of
+		// SleepUntil takes the last one
+		if (deadline - now < 1000000)
+			return;
+#endif
+
+		g_NetReceiveThread.WaitForPacket(deadline);
+	}
 }
 
 void CFrameScheduler::SleepUntil(uint64 deadline)

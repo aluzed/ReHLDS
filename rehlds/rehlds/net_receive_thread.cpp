@@ -2,6 +2,8 @@
 
 #ifndef _WIN32
 #include <poll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 #endif
 
 CNetReceiveThread g_NetReceiveThread;
@@ -105,6 +107,12 @@ CNetReceiveThread::CNetReceiveThread() :
 #endif
 	m_bStopRequested(false),
 	m_NumSockets(0),
+	m_bMainWaiting(false),
+#ifdef _WIN32
+	m_hWakeEvent(nullptr),
+#else
+	m_WakeFd(-1),
+#endif
 	m_ConfigVersion(0),
 	m_SeenConfigVersion(0),
 	m_BanReplyWindowStart(0),
@@ -218,6 +226,15 @@ void CNetReceiveThread::Start(SOCKET serverSocket, SOCKET serverSocketIpx)
 	m_Queue.Clear();
 	m_Config.reset();
 	m_SeenConfigVersion = m_ConfigVersion.load();
+
+	// Wake handle of WaitForPacket; without it the main thread sleeps until the tick
+#ifdef _WIN32
+	if (!m_hWakeEvent)
+		m_hWakeEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+#else
+	if (m_WakeFd < 0)
+		m_WakeFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+#endif
 	m_bConfigPublished = false;
 	BeginFrame();
 
@@ -268,6 +285,20 @@ void CNetReceiveThread::Stop()
 	// Packets still queued were received from sockets that are about to be closed
 	m_Queue.Clear();
 	m_bRunning = false;
+
+#ifdef _WIN32
+	if (m_hWakeEvent)
+	{
+		CloseHandle(m_hWakeEvent);
+		m_hWakeEvent = nullptr;
+	}
+#else
+	if (m_WakeFd >= 0)
+	{
+		close(m_WakeFd);
+		m_WakeFd = -1;
+	}
+#endif
 }
 
 void CNetReceiveThread::ClientsChanged()
@@ -404,6 +435,73 @@ bool CNetReceiveThread::Pop(sizebuf_t *msg, netadr_t *from)
 	return true;
 }
 
+// The main thread announces that it waits, then checks the queue; the network
+// thread queues, then checks whether the main thread waits. With a full fence on
+// each side, at least one of them sees the other's change: the main thread either
+// finds the packet or is woken. A wake-up that arrives after the main thread
+// stopped waiting only cuts its next wait short.
+void CNetReceiveThread::WaitForPacket(uint64 deadlineNs)
+{
+	m_bMainWaiting.store(true);
+	std::atomic_thread_fence(std::memory_order_seq_cst);
+
+	uint64 now = Sys_MonotonicNs();
+	if (!HasPackets() && now < deadlineNs)
+	{
+#ifdef _WIN32
+		// Millisecond timeout, rounded down: the caller sleeps the rest precisely
+		DWORD timeoutMs = (DWORD)((deadlineNs - now) / 1000000);
+		if (m_hWakeEvent && timeoutMs > 0)
+			WaitForSingleObject(m_hWakeEvent, timeoutMs);
+#else
+		if (m_WakeFd >= 0)
+		{
+			struct pollfd fd;
+			fd.fd = m_WakeFd;
+			fd.events = POLLIN;
+			fd.revents = 0;
+
+			uint64 remaining = deadlineNs - now;
+			struct timespec timeout;
+			timeout.tv_sec = (time_t)(remaining / NS_PER_SEC);
+			timeout.tv_nsec = (long)(remaining % NS_PER_SEC);
+
+			if (ppoll(&fd, 1, &timeout, nullptr) > 0)
+			{
+				uint64 value;
+				if (read(m_WakeFd, &value, sizeof(value)) < 0)
+				{
+					// EAGAIN: already reset, nothing to do
+				}
+			}
+		}
+#endif
+	}
+
+	m_bMainWaiting.store(false, std::memory_order_relaxed);
+}
+
+void CNetReceiveThread::WakeMainThread()
+{
+	std::atomic_thread_fence(std::memory_order_seq_cst);
+	if (!m_bMainWaiting.load())
+		return;
+
+#ifdef _WIN32
+	if (m_hWakeEvent)
+		SetEvent(m_hWakeEvent);
+#else
+	if (m_WakeFd >= 0)
+	{
+		uint64 one = 1;
+		if (write(m_WakeFd, &one, sizeof(one)) < 0)
+		{
+			// EAGAIN: the counter is already set, the main thread wakes anyway
+		}
+	}
+#endif
+}
+
 void CNetReceiveThread::Run()
 {
 	SetCurrentThreadName("rehlds-net");
@@ -415,8 +513,12 @@ void CNetReceiveThread::Run()
 
 		RefreshConfig();
 
+		int queued = 0;
 		for (int i = 0; i < m_NumSockets; i++)
-			Drain(m_Sockets[i]);
+			queued += Drain(m_Sockets[i]);
+
+		if (queued)
+			WakeMainThread();
 	}
 
 	m_Config.reset();
@@ -458,8 +560,9 @@ void CNetReceiveThread::RefreshConfig()
 	m_SeenConfigVersion = version;
 }
 
-void CNetReceiveThread::Drain(SOCKET sock)
+int CNetReceiveThread::Drain(SOCKET sock)
 {
+	int queued = 0;
 	for (int count = 0; count < MAX_PACKETS_PER_DRAIN; count++)
 	{
 		// Receive straight into the next queue slot; when the queue is full, into
@@ -474,7 +577,7 @@ void CNetReceiveThread::Drain(SOCKET sock)
 		{
 			int err = LastSocketError();
 			if (IsWouldBlock(err))
-				return;
+				return queued;
 
 			if (!IsIgnoredError(err))
 			{
@@ -487,7 +590,7 @@ void CNetReceiveThread::Drain(SOCKET sock)
 				}
 #endif
 				Count(m_RecvErrors);
-				return;
+				return queued;
 			}
 
 			continue;
@@ -521,11 +624,13 @@ void CNetReceiveThread::Drain(SOCKET sock)
 		slot->size = size;
 		slot->arrivalNs = now;
 		m_Queue.CommitPush();
+		queued++;
 
 		uint32 depth = (uint32)m_Queue.Size();
 		if (depth > m_MaxQueueDepth.load(std::memory_order_relaxed))
 			m_MaxQueueDepth.store(depth, std::memory_order_relaxed);
 	}
+	return queued;
 }
 
 int CNetReceiveThread::Classify(const unsigned char *data, int size, const netadr_t &from, uint64 now)

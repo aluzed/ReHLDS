@@ -77,6 +77,14 @@ public:
 	// Main thread: pops the oldest packet into msg and from
 	bool Pop(sizebuf_t *msg, netadr_t *from);
 
+	// Main thread: true when packets are waiting in the queue
+	bool HasPackets() { return m_Queue.Front() != nullptr; }
+
+	// Main thread: sleeps until a packet is queued or until deadlineNs (Sys_MonotonicNs
+	// time), whichever comes first; returns at once when packets are already waiting.
+	// May return early without a packet. sys_wake_on_packet, MT-102.
+	void WaitForPacket(uint64 deadlineNs);
+
 	void Cmd_Stats();
 
 private:
@@ -144,7 +152,10 @@ private:
 
 	void Run();
 	bool WaitReadable(int timeoutMs);
-	void Drain(SOCKET sock);
+	// Returns the number of packets queued
+	int Drain(SOCKET sock);
+	// Wakes the main thread when it waits in WaitForPacket
+	void WakeMainThread();
 	// Returns NTD_NONE to queue the packet, or the reason for dropping it
 	int Classify(const unsigned char *data, int size, const netadr_t &from, uint64 now);
 	bool IsBanned(const netadr_t &from, uint64 now) const;
@@ -185,6 +196,15 @@ private:
 	int m_NumSockets;
 
 	SpscRing<Packet> m_Queue;
+
+	// The main thread sleeps in WaitForPacket: the network thread signals the wake
+	// handle after queuing packets (see WaitForPacket for the ordering)
+	std::atomic<bool> m_bMainWaiting;
+#ifdef _WIN32
+	HANDLE m_hWakeEvent;
+#else
+	int m_WakeFd;
+#endif
 
 	// Configuration hand-off: the main thread swaps the pointer under the mutex
 	// and bumps the version; the thread takes a reference when the version changed.

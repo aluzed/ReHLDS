@@ -30,6 +30,9 @@ import time
 
 PROTOCOL_VERSION = 48
 OOB_HEADER = b"\xff\xff\xff\xff"
+# Datagrams over 1400 bytes are split by the server (NET_SendLong): 4-byte header,
+# 4-byte split sequence, then a byte with the part index (high nibble) and count
+SPLIT_HEADER = b"\xfe\xff\xff\xff"
 
 CLC_NOP = 1
 CLC_MOVE = 2
@@ -176,6 +179,30 @@ def encode_usercmd(cmd):
 
 
 # --- Netchan (engine/net_chan.cpp) ---------------------------------------------
+
+class SplitReassembler:
+    """Joins the parts of the server's split datagrams, latest datagram only."""
+
+    def __init__(self):
+        self.sequence = None
+        self.parts = {}
+
+    def add(self, packet):
+        if len(packet) < 9:
+            return None
+        sequence = struct.unpack_from("<i", packet, 4)[0]
+        index, count = packet[8] >> 4, packet[8] & 0x0F
+        if sequence != self.sequence:
+            self.sequence = sequence
+            self.parts = {}
+        self.parts[index] = packet[9:]
+        if count == 0 or len(self.parts) < count:
+            return None
+        whole = b"".join(self.parts[i] for i in range(count) if i in self.parts)
+        self.sequence = None
+        self.parts = {}
+        return whole
+
 
 class Netchan:
     def __init__(self):
@@ -345,6 +372,13 @@ class Client:
         self.scoreboard_until = 0.0
         self.last_receive = None
         self.intervals = []
+        # Input latency: from sending a command to receiving the first server packet
+        # that acknowledges it, i.e. sent after the server processed it: the wait for
+        # the server's tick and for the client's next snapshot
+        self.sent_at = {}
+        self.last_ack = 0
+        self.input_latency = []
+        self.split = SplitReassembler()
         self.ingame_commands = []
         self.play = play
         self.join_at = None
@@ -371,6 +405,11 @@ class Client:
         self.state_since = now
 
     def on_packet(self, packet, now):
+        if packet[:4] == SPLIT_HEADER:
+            packet = self.split.add(packet)
+            if packet is None:
+                return
+
         if packet[:4] == OOB_HEADER:
             self.on_oob(packet[4:], now)
             return
@@ -385,6 +424,13 @@ class Client:
             if self.last_receive is not None:
                 self.intervals.append(now - self.last_receive)
             self.last_receive = now
+
+            # Every command acknowledged by this packet waited until now
+            ack = self.netchan.incoming_acknowledged
+            if ack > self.last_ack:
+                for sequence in [k for k in self.sent_at if k <= ack]:
+                    self.input_latency.append(now - self.sent_at.pop(sequence))
+                self.last_ack = ack
             return
 
         if completed is None or is_print_only(completed):
@@ -501,6 +547,8 @@ class Client:
             unreliable += bytes([CLC_DELTA, self.netchan.incoming_sequence & 0xFF])
         packet, _ = self.netchan.transmit(unreliable)
         self.sock.sendto(packet, self.server)
+        if self.state == "ingame":
+            self.sent_at[sequence] = time.monotonic()
 
         interval = 1.0 / self.cmdrate if self.state == "ingame" else 0.02
         self.next_send = max(self.next_send + interval, now - interval)
@@ -532,6 +580,14 @@ def summarize(clients, duration):
             "interval_ms_p99": percentile(intervals, 0.99),
             "interval_ms_max": max(intervals),
             "interval_ms_stddev": math.sqrt(sum((v - avg) ** 2 for v in intervals) / len(intervals)),
+        })
+    latency = [v * 1000.0 for c in clients for v in c.input_latency]
+    if latency:
+        summary.update({
+            "input_latency_ms_avg": sum(latency) / len(latency),
+            "input_latency_ms_p50": percentile(latency, 0.50),
+            "input_latency_ms_p95": percentile(latency, 0.95),
+            "input_latency_ms_p99": percentile(latency, 0.99),
         })
     return summary
 
@@ -587,6 +643,7 @@ def main():
         if measure_start is not None and now >= measure_start and not getattr(main, "reset", False):
             for c in clients:
                 c.intervals = []
+                c.input_latency = []
             main.reset = True
         if measure_end is not None and now >= measure_end:
             break

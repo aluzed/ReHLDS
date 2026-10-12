@@ -16,9 +16,10 @@ for the recommended settings and [`docs/stories/`](docs/stories/README.md) for t
 - `sv_rehlds_snapshot_spread`: client snapshots spread evenly over the frames, exact update rate (MT-106).
 - `-netthread`, `-netthread_queue`, `net_thread_filter`, `net_thread_stats`: network receive thread that drops banned, rate-limited, malformed and unknown-address packets before the game loop (MT-302, MT-303).
 - `sv_profile`, `sv_profile_csv`, `sv_profile_reset`, `sv_profile_enable`, `sv_profile_frames`: per-phase frame profiler (MT-002).
-- `-sys_threads`, `sv_parallel_send`, `sys_threads_spin_us`, `sv_parallel_send_stats`: client snapshots encoded on worker threads; byte-identical output, serial fallback for plugin hooks on the encode path. With game DLL conditional encoders (Counter-Strike), the encoding starts once every snapshot of the frame is gathered (MT-401 to MT-404).
+- `-sys_threads`, `sv_parallel_send`, `sys_threads_spin_us`, `sv_parallel_send_stats`: client snapshots encoded on worker threads; byte-identical output, serial fallback for plugin hooks on the encode path. With game DLL conditional encoders (Counter-Strike), the encoding starts once every snapshot of the frame is gathered. Little gain with real clients, not in the recommended settings (MT-401 to MT-404).
+- `sys_wake_on_packet`: with the network thread and the scheduler, packets read as they arrive between ticks; takes player movement out of the tick, does not lower the latency players see (MT-102).
 - `-netrecord`, `-netreplay`, `-netsends`: byte-exact session record and replay for regression checks (MT-004).
-- `tools/bench/`: Docker load tests (bots, protocol clients, HLTV, floods), replay regression, Helgrind race checks and map change checks with Metamod; `tools/staging/`: field validation server (MT-003, MT-004, MT-702).
+- `tools/bench/`: Docker load tests (bots, protocol clients with input latency measurement, HLTV, floods), replay regression, Helgrind race checks and map change checks with Metamod; `tools/staging/`: field validation server (MT-003, MT-004, MT-702).
 
 ### Fixed
 - `sv_parallel_send 1` with Metamod: the game DLL's conditional encoders ran Metamod's callbacks on the encoding threads while the main thread ran game DLL code, which corrupted the heap; the server crashed at the next map change. Never released (MT-404).
