@@ -24,6 +24,7 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers with spare cores: 2, 1 (under field validation) | Snapshots encoded on worker threads |
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
+| `sv_log_async` | MT-301 | 0 | to decide after field validation | Log files written on their own thread, see below |
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
 
@@ -162,6 +163,24 @@ benchmark the frame p99 drops from 1186 to 385 µs and the tick interval p99 fro
 1144 µs, for about 3 % of a core
 ([`stories/MT-102-wake-on-packet.md`](stories/MT-102-wake-on-packet.md)). To be validated
 under real load (MT-702), on a server whose ticks run late because of player movement.
+
+## Log files on their own thread
+
+`sv_log_async 1` writes the server log file and `qconsole.log` (`-condebug`) on a
+dedicated thread: the main thread only formats and queues the line (a few
+microseconds). Lines, their order and their timestamps are the same as without it.
+
+The log file goes through an 8 KB stdio buffer: even with every shot logged
+(`mp_logdetail 3`) and 20 bots, the server writes to the disk about once every two
+minutes, and on a healthy disk the write takes microseconds. The gain is on a slow or
+remote disk (NFS, a full page cache, a backup running), where each of those writes
+stalls the frame. With `-condebug`, the engine opens, writes and closes `qconsole.log`
+for every console line: on a disk taking 20 ms per write, 20 bots gave 5 to 7 frames
+over 10 ms in 30 s (up to 41 ms), none with `sv_log_async 1` (benchmark,
+[`stories/MT-301-async-log-writer.md`](stories/MT-301-async-log-writer.md)).
+
+Console output (stdout, the terminal, `screen`) and plugin log files (AMX Mod X's
+`log_amx`, which writes its own files) are not concerned.
 
 ## Many players and entities: parallel snapshot encoding
 

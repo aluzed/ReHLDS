@@ -448,6 +448,8 @@ void NORETURN Sys_Error(const char *error, ...)
 		gEntityInterface.pfnSys_Error(text);
 
 	Log_Printf("FATAL ERROR (shutting down): %s\n", text);
+	// The last lines of the log, this one included, before the server goes down
+	AsyncLog_Flush(2000);
 
 #ifdef REHLDS_FIXES
 	if (syserror_logfile.string[0] != '\0')
@@ -1314,6 +1316,12 @@ void Con_DebugLog(const char *file, const char *fmt, ...)
 	va_end(argptr);
 
 	data[sizeof(data) - 1] = 0;
+
+	if (sv_log_async.value != 0.0f)
+	{
+		AsyncLog_Append(file, data);
+		return;
+	}
 
 #ifdef _WIN32
 

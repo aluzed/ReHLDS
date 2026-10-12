@@ -114,6 +114,8 @@ This means that plugins that do binary code analysis (Orpheu for example) probab
 <li>sv_profile_frames &lt;1000-600000&gt; // Number of frames the profiler keeps. Takes effect after sv_profile_reset. Default: 60000
 <li>sv_parallel_send &lt;1|0&gt; // Encode the clients' snapshots on the worker threads started with -sys_threads. With game DLL conditional encoders (Counter-Strike), after the main thread gathered them all; otherwise while it gathers the next ones. Snapshots stay byte-identical. Falls back to the main thread for the snapshots a plugin hooks (ReAPI SV_EmitPings: snapshots with pings; SV_CreatePacketEntities, SV_EmitEvents: all). See [performance tuning](docs/performance-tuning.md). Default: 0
 <li>sys_threads_spin_us &lt;0-2000&gt; // How long the worker threads spin for the next frame's snapshots before sleeping. Default: 0
+<li>sv_log_async &lt;1|0&gt; // Write the server log file and qconsole.log (-condebug) on a dedicated thread, so that a slow disk never stalls a frame. Takes effect at the next log file (map change or "log on"). Default: 0
+<li>sv_log_async_overflow &lt;block|drop&gt; // With sv_log_async 1, when 4 MB of log lines are waiting to be written: wait for room (block) or drop the line and count it (drop). Default: block
 <li>net_thread_filter &lt;1|0&gt; // With -netthread, drop on the network thread the packets the main thread would ignore: IP-banned addresses (sv_filterban), queries above the rate limits, malformed packets and game packets from addresses that are not connected. Default: 1
 </ul>
 </details>
@@ -141,6 +143,7 @@ See [docs/performance-tuning.md](docs/performance-tuning.md) for the recommended
 <li>sv_profile_csv &lt;file&gt; // Write the recorded frames to &lt;file&gt; in the game directory, one row per frame (tools/bench/report.py reads it)</li>
 <li>sv_profile_reset // Clear the recorded frames and apply a new sv_profile_frames</li>
 <li>sv_parallel_send_stats // Print the number of worker threads and whether the snapshots are encoded in parallel, else why not</li>
+<li>sv_log_async_stats // Print the log writer thread's counters: lines queued, queue usage, dropped lines, time the main thread waited, write errors</li>
 <li>net_thread_stats // Print the network thread's counters: packets received, dropped per reason, ban replies, queue usage</li>
 </ul>
 
