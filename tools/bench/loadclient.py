@@ -334,6 +334,8 @@ class Client:
         self.ingame_commands = []
         self.play = play
         self.join_at = None
+        self.next_fire = 0.0
+        self.fire_until = 0.0
 
     def log(self, message):
         print(f"[client {self.index:02d}] {message}", file=sys.stderr)
@@ -429,6 +431,13 @@ class Client:
         buttons = IN_SCORE if now < self.scoreboard_until else 0
         if random.random() < 0.01:
             buttons |= IN_JUMP
+        if self.play and self.join_at is None:
+            # Fire a short burst every few seconds: weapon events and damage
+            if now >= self.next_fire:
+                self.fire_until = now + 0.2
+                self.next_fire = now + random.uniform(2.0, 4.0)
+            if now < self.fire_until:
+                buttons |= IN_ATTACK
         if self.join_at is not None:
             if now < self.join_at:
                 # Close the message of the day: hold attack, release before joining
