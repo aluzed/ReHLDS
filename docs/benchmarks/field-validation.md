@@ -43,8 +43,15 @@ plugin error, no player complaint specific to the session.
 
 | Date | Engine | Features | Players | Duration | Ticks/s | Frame p99 | Crashes | Notes |
 |---|---|---|---|---|---|---|---|---|
-| | | | | | | | | |
+| 2026-10-12 | `6405e18` | on | 1 + bots | ≈ 20 min | 1000.0 | 56 µs (bots only, last minute) | 0 | First player: "ultra smooth". |
 
 ## Findings
 
-(to fill in)
+* **Freeze on map change, not engine-related**: the map cycle moved to `de_airstrip`,
+  which had no bot navigation file, and ReGameDLL analysed the map on the main thread
+  (same with any engine). All maps of the cycle now have their `.nav` generated
+  beforehand (`tools/bench/lib/generate_nav.sh`); do the same for any map added.
+* `server.sh profile` kept only the last 60 s (the profiler's default buffer); it now
+  sizes the buffer for the whole capture.
+* Bots-only server, features on: 1000.0 ticks/s, 12 µs tick jitter, 1 % busy, frame p99
+  56 µs; the longest frame (2.4 ms) is in `Steam_RunFrame`.

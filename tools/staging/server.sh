@@ -114,6 +114,12 @@ cmd_profile() {
 	FEATURES_RUNNING=$(sed -n 's/.*features=\([01]\).*/\1/p' "$STAGING_DIR/engine.txt" 2>/dev/null)
 	local seconds=${1:-300}
 	local name=profile-$(date +%Y%m%d-%H%M%S)-features${FEATURES_RUNNING:-}.csv
+	# The profiler keeps the last sv_profile_frames frames: size it for the whole
+	# capture at 1000 Hz (at most 600 s), sv_profile_reset applies the new size
+	local frames=$((seconds * 1000 + 5000))
+	[ "$frames" -gt 600000 ] && frames=600000
+	rcon sv_profile_frames "$frames" > /dev/null
+	rcon sv_profile_reset > /dev/null
 	rcon sv_profile "$seconds"
 	sleep $((seconds + 2))
 	rcon sv_profile_csv "$name"
