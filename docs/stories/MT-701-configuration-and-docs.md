@@ -30,5 +30,20 @@ so that I can enable them safely on my server.
 
 ## Acceptance criteria
 
-* [ ] Every new option documented, with its story ID.
+* [x] Every new option documented, with its story ID.
 * [ ] Tuning guide reviewed by someone who runs public servers.
+
+## Status
+
+Done for the shipped stories (MT-002, MT-004, MT-101, MT-103, MT-106, MT-302, MT-303):
+
+* `README.md`: the cvars in "Configuring", a new "Command-line parameters" list, the
+  profiler and `net_thread_stats` in "Commands". The options of stories not implemented
+  (`sys_threads`, `sv_log_async`, `sv_parallel_*`) are not documented.
+* [`docs/performance-tuning.md`](../performance-tuning.md): recommended settings with
+  their story IDs, choosing `sys_ticrate`, the scheduler, snapshot spreading, the network
+  thread and its counters, machine advice (governor, one core per instance, socket
+  buffers), game DLL spikes (bot navigation files), measuring with the profiler.
+* `CHANGELOG.md`: "Unreleased" section.
+
+Review by a public server operator pending.

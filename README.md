@@ -105,8 +105,26 @@ This means that plugins that do binary code analysis (Orpheu for example) probab
 <li>sv_rehlds_movecmdtime_max_warnings // Maximum allowed speedhack/slowmo warnings before the punishment is applied. -1 - disable detection. Default: -1
 <li>sv_rehlds_movecmdtime_punish // Time in minutes for which the player will be banned for speedhacking/slowing (-1 - Kick, 0 - Permanent, use a negative number for a kick). Default: -1
 <li>sv_reconnect_timeout // Hard deadline in seconds for a client to re-initiate its connection after a level change, independent of netchan activity. Closes a phantom-slot exploit where a cheat blocks the "reconnect" command and keeps the netchan warm so sv_timeout never fires. 0 - disabled. Default: 30
+<li>sys_scheduler &lt;1|0&gt; // Pace server frames on a fixed grid of deadlines, one every 1/sys_ticrate seconds, instead of the launcher's 1 ms sleep loop. Gives the exact sys_ticrate (e.g. 1000.0 instead of ~935 fps) with a much steadier tick. See [performance tuning](docs/performance-tuning.md). Default: 0
+<li>sys_scheduler_slice &lt;1-1000&gt; // With sys_scheduler 1, how long in milliseconds the engine keeps running frames before returning to the launcher (console input). Default: 100
+<li>sys_spin_us &lt;0-2000&gt; // With sys_scheduler 1, busy-wait this many microseconds before each tick instead of sleeping, for an even steadier tick. Burns CPU: only for a core dedicated to the server. Default: 0
+<li>sv_rehlds_snapshot_spread &lt;1|0&gt; // Spread the clients' snapshots evenly over the frames (each client gets a fixed phase in its update interval) instead of sending them all in the same frame, and keep the exact cl_updaterate. Default: 0
+<li>sv_profile_enable &lt;1|0&gt; // Record the per-phase timings of every frame continuously (last sv_profile_frames frames). sv_profile &lt;seconds&gt; records without it. Default: 0
+<li>sv_profile_frames &lt;1000-600000&gt; // Number of frames the profiler keeps. Takes effect after sv_profile_reset. Default: 60000
+<li>net_thread_filter &lt;1|0&gt; // With -netthread, drop on the network thread the packets the main thread would ignore: IP-banned addresses (sv_filterban), queries above the rate limits, malformed packets and game packets from addresses that are not connected. Default: 1
 </ul>
 </details>
+
+### Command-line parameters
+<ul>
+<li>-netthread // Read the server socket on a dedicated network thread, which filters floods and junk before they reach the game loop (see net_thread_filter). Default: off
+<li>-netthread_queue &lt;64-16384&gt; // Size in packets of the queue between the network thread and the main thread. Default: 1024
+<li>-netrecord &lt;file&gt; // Record the inputs of the session (clock, packets, console) to replay it byte for byte. For developers, see [docs/benchmarks/replay.md](docs/benchmarks/replay.md)
+<li>-netreplay &lt;file&gt; // Replay a session recorded with -netrecord as fast as possible, without the network, then quit
+<li>-netsends &lt;file&gt; // With -netrecord or -netreplay, write every packet sent by the server to &lt;file&gt;
+</ul>
+
+See [docs/performance-tuning.md](docs/performance-tuning.md) for the recommended settings.
 
 ## Commands
 <ul>
@@ -115,6 +133,10 @@ This means that plugins that do binary code analysis (Orpheu for example) probab
 <li>rcon_adduser &lt;ipaddress/CIDR&gt; // Add a new IP address or CIDR range to RCON user list (This command adds a new IP address to the RCON user list. The specified IP or CIDR range is granted privileged access to server console. Without any Rcon users, access is allowed to anyone with a valid password)</li>
 <li>rcon_deluser &lt;ipaddress&gt; {removeAll} // Remove an IP address or CIDR range from RCON user list</li>
 <li>rcon_users // List all IP addresses and CIDR ranges in RCON user list</li>
+<li>sv_profile [seconds] // Record the per-phase frame timings for &lt;seconds&gt;, then print a report (tick rate, jitter, percentiles per phase). Without argument, print a report of the frames already recorded</li>
+<li>sv_profile_csv &lt;file&gt; // Write the recorded frames to &lt;file&gt; in the game directory, one row per frame (tools/bench/report.py reads it)</li>
+<li>sv_profile_reset // Clear the recorded frames and apply a new sv_profile_frames</li>
+<li>net_thread_stats // Print the network thread's counters: packets received, dropped per reason, ban replies, queue usage</li>
 </ul>
 
 ## Build instructions

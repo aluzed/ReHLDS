@@ -91,8 +91,8 @@ frame on target servers, epic 4 is re-scoped.
 
 ## Status and decision gate (2026-10-12)
 
-Done: MT-002, MT-003, MT-101, MT-103, MT-106, MT-302, MT-303, MT-004 (Linux, not in CI);
-MT-001 except the Windows CI run.
+Done: MT-002, MT-003, MT-101, MT-103, MT-106, MT-302, MT-303, MT-004 (Linux, not in CI),
+MT-701 (review pending); MT-001 except the Windows CI run. MT-702 in progress.
 
 Measured on a full server (`clients32`, see
 [`../benchmarks/clients32.md`](../benchmarks/clients32.md)): with the scheduler (MT-101)
@@ -143,6 +143,11 @@ no race in engine code with the network thread under load. Not in CI yet. Sessio
 bots are not deterministic (game DLL bot AI).
 
 Next: Windows CI build (all the Windows code paths of MT-002, MT-101, MT-302).
+
+### Update: documentation (MT-701)
+
+Operator guide: [`../performance-tuning.md`](../performance-tuning.md); every option is in
+`README.md` and `CHANGELOG.md`.
 
 ## Explicit non-goals
 
