@@ -32,7 +32,7 @@ PORT=27015
 if [ "${FEATURES:-1}" = 0 ]; then
 	FEATURE_ARGS=(+sys_ticrate 1000)
 else
-	FEATURE_ARGS=(-netthread +sys_ticrate 1000 +sys_scheduler 1 +sv_rehlds_snapshot_spread 1)
+	FEATURE_ARGS=(-netthread -sys_threads 2 +sys_ticrate 1000 +sys_scheduler 1 +sv_rehlds_snapshot_spread 1 +sv_parallel_send 1)
 fi
 
 rcon() {
