@@ -29,7 +29,7 @@ current frame, the hard constraints and what can be parallelised.
 | [MT-003](MT-003-load-test-harness.md) | Load-test harness and reference benchmarks | E0 Foundations | P0 | L | MT-002 |
 | [MT-004](MT-004-regression-replay-and-tsan.md) | Byte-exact regression replay and ThreadSanitizer CI | E0 Foundations | P0 | M | MT-001 |
 | [MT-101](MT-101-deadline-frame-scheduler.md) | Deadline-based frame scheduler | E1 Main loop timing | P0 | M | MT-002 |
-| [MT-102](MT-102-wake-on-packet.md) | Wake the main loop on packet arrival | E1 Main loop timing | P1 | M | MT-101 |
+| [MT-102](MT-102-wake-on-packet.md) | Wake the main loop on packet arrival (closed, no gain) | E1 Main loop timing | P1 | M | MT-101 |
 | [MT-103](MT-103-timer-precision-fixes.md) | Timer precision and profiling bug fixes | E1 Main loop timing | P1 | S | MT-002 |
 | [MT-104](MT-104-client-lookup-by-address.md) | O(1) client lookup by address | E1 Main loop timing | P2 | S | MT-002 |
 | [MT-105](MT-105-batched-socket-syscalls.md) | Batched socket syscalls (recvmmsg/sendmmsg) | E1 Main loop timing | P2 | M | MT-302 |
@@ -92,7 +92,7 @@ frame on target servers, epic 4 is re-scoped.
 ## Status and decision gate (2026-10-12)
 
 Done: MT-002, MT-003, MT-101, MT-103, MT-106, MT-302, MT-303, MT-004 (Linux, not in CI),
-MT-401 to MT-404, MT-701 (review pending); MT-202 and MT-203 in part; MT-001 except the
+MT-401 to MT-404, MT-701 (review pending); MT-102 closed without implementation (no gain, see the story); MT-202 and MT-203 in part; MT-001 except the
 Windows CI run. MT-702 in progress.
 
 Measured on a full server (`clients32`, see
