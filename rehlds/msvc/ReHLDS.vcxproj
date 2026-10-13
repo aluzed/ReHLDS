@@ -148,6 +148,7 @@
     <ClCompile Include="..\rehlds\net_replay.cpp" />
     <ClCompile Include="..\rehlds\parallel_send.cpp" />
     <ClCompile Include="..\rehlds\async_log_writer.cpp" />
+    <ClCompile Include="..\rehlds\file_compressor.cpp" />
     <ClCompile Include="..\rehlds\thread_state.cpp" />
     <ClCompile Include="..\rehlds\threading\worker_pool.cpp" />
     <ClCompile Include="..\rehlds\structSizeCheck.cpp" />
@@ -503,6 +504,8 @@
     <ClInclude Include="..\rehlds\threading\spsc_ring.h" />
     <ClInclude Include="..\rehlds\parallel_send.h" />
     <ClInclude Include="..\rehlds\async_log_writer.h" />
+    <ClInclude Include="..\rehlds\file_compressor.h" />
+    <ClInclude Include="..\rehlds\threading\native_lock.h" />
     <ClInclude Include="..\rehlds\thread_state.h" />
     <ClInclude Include="..\rehlds\threading\worker_pool.h" />
     <ClInclude Include="..\rehlds\monotonic_clock.h" />

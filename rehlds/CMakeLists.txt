@@ -179,6 +179,7 @@ set(ENGINE_SRCS
 	rehlds/frame_profiler.cpp
 	rehlds/frame_scheduler.cpp
 	rehlds/async_log_writer.cpp
+	rehlds/file_compressor.cpp
 	rehlds/FlightRecorderImpl.cpp
 	rehlds/hookchains_impl.cpp
 	rehlds/main.cpp

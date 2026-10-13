@@ -1333,6 +1333,7 @@ void Host_Shutdown(void)
 	Log_Printf("Server shutdown\n");
 	Log_Close();
 	AsyncLog_Shutdown();
+	FileCompressor_Shutdown();
 	COM_Shutdown();
 	CL_Shutdown();
 	DELTA_Shutdown();

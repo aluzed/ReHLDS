@@ -34,6 +34,13 @@ ENTITIES=0
 # CLIENTS_ALIVE=1: the load clients join a team and spawn as players (loadclient.py
 # --play); by default they stay dead, as in the first reports
 CLIENTS_ALIVE=0
+# File that CLIENT_DOWNLOADERS of the load clients download through the game connection
+# (dlfile) while they sign on, all connecting CLIENT_DOWNLOAD_AFTER seconds into the
+# measurement; its compressed copy (.ztmp) is deleted first, so that the server
+# compresses it again
+CLIENT_DOWNLOAD=
+CLIENT_DOWNLOADERS=0
+CLIENT_DOWNLOAD_AFTER=5
 # Console commands sent once the map is loaded, and at the end, separated by ';'
 SERVER_COMMANDS=
 FINAL_COMMANDS=
@@ -51,6 +58,10 @@ export LD_LIBRARY_PATH=.
 client_args=
 if [ "$CLIENTS" -gt 0 ]; then
 	client_args="+mp_consistency 0 +sv_rehlds_maxclients_from_single_ip $CLIENTS"
+fi
+
+if [ -n "$CLIENT_DOWNLOAD" ]; then
+	rm -f "cstrike/$CLIENT_DOWNLOAD.ztmp" "cstrike/$CLIENT_DOWNLOAD.ztmp.part"
 fi
 
 fifo=$out/console.fifo
@@ -100,6 +111,7 @@ if [ "$CLIENTS" -gt 0 ]; then
 		--clients "$CLIENTS" --cmdrate "$CLIENT_CMDRATE" \
 		--measure-at "$(( $(date +%s) + WARMUP ))" --duration "$DURATION" \
 		$([ "$CLIENTS_ALIVE" = 1 ] && echo --play) \
+		${CLIENT_DOWNLOAD:+--download "$CLIENT_DOWNLOAD" --download-clients "$CLIENT_DOWNLOADERS" --download-at "$(( $(date +%s) + WARMUP + CLIENT_DOWNLOAD_AFTER ))"} \
 		--output "$out/clients.json" > /dev/null 2> "$out/loadclient.log" &
 fi
 

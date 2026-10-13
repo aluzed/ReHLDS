@@ -60,6 +60,7 @@
 #include "threading/worker_pool.h"
 #include "parallel_send.h"
 #include "async_log_writer.h"
+#include "file_compressor.h"
 #include "net_replay.h"
 
 #include "dlls/cdll_dll.h"

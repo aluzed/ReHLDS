@@ -351,6 +351,9 @@
     <ClCompile Include="..\rehlds\async_log_writer.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
+    <ClCompile Include="..\rehlds\file_compressor.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
     <ClCompile Include="..\rehlds\thread_state.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
@@ -1099,6 +1102,12 @@
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\async_log_writer.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\file_compressor.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\threading\native_lock.h">
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\thread_state.h">

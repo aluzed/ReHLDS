@@ -70,6 +70,10 @@ int Netchan_CreateFileFragments(qboolean server, netchan_t *chan, const char *fi
 qboolean Netchan_IsFileTransferActive(netchan_t *chan, const char *filename);
 #ifdef REHLDS_FIXES
 int Netchan_CreateFileFragments_(qboolean server, netchan_t *chan, const char *filename);
+#ifdef REHLDS_FIXES
+// Netchan_CreateFileFragments_: the file is being compressed, try again later
+const int NETCHAN_FILE_PENDING = -1;
+#endif
 #endif // REHLDS_FIXES
 void Netchan_FlushIncoming(netchan_t *chan, int stream);
 qboolean Netchan_CopyNormalFragments(netchan_t *chan);

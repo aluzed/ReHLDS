@@ -898,7 +898,16 @@ void Netchan_FragSend(netchan_t *chan)
 #ifdef REHLDS_FIXES
 		if (wait->fragbufs->isfile && !wait->fragbufs->isbuffer && !wait->fragbufs->size)
 		{
-			if (!Netchan_CreateFileFragments_(true, chan, wait->fragbufs->filename))
+			int created = Netchan_CreateFileFragments_(true, chan, wait->fragbufs->filename);
+
+			// Still being compressed: keep the file at the head of the queue
+			if (created == NETCHAN_FILE_PENDING)
+			{
+				chan->waitlist[i] = wait;
+				continue;
+			}
+
+			if (!created)
 			{
 				Mem_Free(wait);
 
@@ -1034,6 +1043,88 @@ void Netchan_AddFragbufToTail(fragbufwaiting_t *wait, fragbuf_t *buf)
 	}
 }
 
+#ifdef REHLDS_FIXES
+// sv_filetransfer_async 1: file fragments built per frame, for all clients. Building
+// them costs about 1.2 us each (4000 for a 6 MB map); past this budget, the next file
+// waits for the next frame, so that clients whose file is ready on the same frame are
+// spread over several
+const int FILE_FRAGMENTS_PER_FRAME = 1000;
+static int s_FileFragmentsFrame = -1;
+static int s_FileFragmentsBuilt;
+
+// Split packets compressed recently, by content. The sign-on messages (resource list,
+// consistency list, about 20 KB) are the same for every client of a map: bzip2 took
+// 2 to 3 ms of the main thread for each connecting client. The output is the same bytes
+const int COMPRESSED_CACHE_SIZE = 8;
+const int COMPRESSED_CACHE_MIN_SIZE = 4096;
+
+struct compressed_message_t
+{
+	int size;				// uncompressed, 0 for a free entry
+	int compressedSize;
+	uint32 lastUse;
+	byte *data;				// uncompressed, then compressed
+};
+
+static compressed_message_t s_CompressedCache[COMPRESSED_CACHE_SIZE];
+static uint32 s_CompressedCacheUse;
+
+static compressed_message_t *Netchan_FindCompressed(const byte *data, int size)
+{
+	for (auto &entry : s_CompressedCache)
+	{
+		if (entry.size == size && !Q_memcmp(entry.data, data, size))
+		{
+			entry.lastUse = ++s_CompressedCacheUse;
+			return &entry;
+		}
+	}
+
+	return nullptr;
+}
+
+static void Netchan_StoreCompressed(const byte *data, int size, const byte *compressed, int compressedSize)
+{
+	compressed_message_t *entry = &s_CompressedCache[0];
+	for (auto &candidate : s_CompressedCache)
+	{
+		if (candidate.lastUse < entry->lastUse)
+			entry = &candidate;
+	}
+
+	if (entry->data)
+		Mem_Free(entry->data);
+
+	entry->data = (byte *)Mem_Malloc(size + compressedSize);
+	if (!entry->data)
+	{
+		entry->size = 0;
+		return;
+	}
+
+	Q_memcpy(entry->data, data, size);
+	Q_memcpy(entry->data + size, compressed, compressedSize);
+	entry->size = size;
+	entry->compressedSize = compressedSize;
+	entry->lastUse = ++s_CompressedCacheUse;
+}
+
+// Netchan_AddFragbufToTail for a chain built in a loop: the caller keeps the tail. Walking
+// the chain for each fragment cost 10 to 20 ms for the 4000 fragments of a 6 MB map
+static void Netchan_AppendFragbuf(fragbufwaiting_t *wait, fragbuf_t **tail, fragbuf_t *buf)
+{
+	buf->next = nullptr;
+	wait->fragbufcount++;
+
+	if (*tail)
+		(*tail)->next = buf;
+	else
+		wait->fragbufs = buf;
+
+	*tail = buf;
+}
+#endif
+
 void Netchan_CreateFragments_(qboolean server, netchan_t *chan, sizebuf_t *msg)
 {
 	fragbuf_t *buf;
@@ -1055,8 +1146,22 @@ void Netchan_CreateFragments_(qboolean server, netchan_t *chan, sizebuf_t *msg)
 		unsigned char compressed[65536];
 		char hdr[4] = "BZ2";
 		unsigned int compressedSize = msg->cursize - sizeof(hdr);	// we should fit in same data buffer minus 4 bytes for a header
+#ifdef REHLDS_FIXES
+		compressed_message_t *cached = msg->cursize >= COMPRESSED_CACHE_MIN_SIZE ? Netchan_FindCompressed(msg->data, msg->cursize) : nullptr;
+		if (cached)
+		{
+			Q_memcpy(msg->data, hdr, sizeof(hdr));
+			Q_memcpy(msg->data + sizeof(hdr), cached->data + cached->size, cached->compressedSize);
+			msg->cursize = cached->compressedSize + sizeof(hdr);
+		}
+		else if (!BZ2_bzBuffToBuffCompress((char *)compressed, &compressedSize, (char *)msg->data, msg->cursize, 9, 0, 30))
+		{
+			if (msg->cursize >= COMPRESSED_CACHE_MIN_SIZE)
+				Netchan_StoreCompressed(msg->data, msg->cursize, compressed, compressedSize);
+#else
 		if (!BZ2_bzBuffToBuffCompress((char *)compressed, &compressedSize, (char *)msg->data, msg->cursize, 9, 0, 30))
 		{
+#endif
 			Con_DPrintf("Compressing split packet (%d -> %d bytes)\n", msg->cursize, compressedSize);
 			Q_memcpy(msg->data, hdr, sizeof(hdr));
 			Q_memcpy(msg->data + sizeof(hdr), compressed, compressedSize);
@@ -1067,6 +1172,9 @@ void Netchan_CreateFragments_(qboolean server, netchan_t *chan, sizebuf_t *msg)
 	chunksize = chan->pfnNetchan_Blocksize(chan->connection_status);
 
 	wait = (fragbufwaiting_t *)Mem_ZeroMalloc(sizeof(fragbufwaiting_t));
+#ifdef REHLDS_FIXES
+	fragbuf_t *tail = nullptr;
+#endif
 
 	remaining = msg->cursize;
 	pos = 0;
@@ -1088,7 +1196,11 @@ void Netchan_CreateFragments_(qboolean server, netchan_t *chan, sizebuf_t *msg)
 		SZ_Write(&buf->frag_message, &msg->data[pos], send);
 		pos += send;
 
+#ifdef REHLDS_FIXES
+		Netchan_AppendFragbuf(wait, &tail, buf);
+#else
 		Netchan_AddFragbufToTail(wait, buf);
+#endif
 	}
 
 	// Now add waiting list item to the end of buffer queue
@@ -1167,6 +1279,9 @@ int Netchan_CreateFileFragmentsFromBuffer(qboolean server, netchan_t *chan, cons
 	chunksize = chan->pfnNetchan_Blocksize(chan->connection_status);
 	send = chunksize;
 	wait = (fragbufwaiting_t *)Mem_ZeroMalloc(0xCu);
+#ifdef REHLDS_FIXES
+	fragbuf_t *tail = nullptr;
+#endif
 	remaining = size;
 	pos = 0;
 
@@ -1216,7 +1331,11 @@ int Netchan_CreateFileFragmentsFromBuffer(qboolean server, netchan_t *chan, cons
 		pos += send;
 		remaining -= send;
 
+#ifdef REHLDS_FIXES
+		Netchan_AppendFragbuf(wait, &tail, buf);
+#else
 		Netchan_AddFragbufToTail(wait, buf);
+#endif
 	}
 
 	if (!chan->waitlist[FRAG_FILE_STREAM]) {
@@ -1322,8 +1441,53 @@ int Netchan_CreateFileFragments_(qboolean server, netchan_t *chan, const char *f
 	bCompressed = FALSE;
 	chunksize = chan->pfnNetchan_Blocksize(chan->connection_status);
 
+#ifdef REHLDS_FIXES
+	// Checked every frame until the compression thread is done: no file system access
+	if (server && FileCompressor_IsPending(filename))
+		return NETCHAN_FILE_PENDING;
+
+	if (server && sv_filetransfer_async.value != 0.0f)
+	{
+		if (s_FileFragmentsFrame != host_framecount)
+		{
+			s_FileFragmentsFrame = host_framecount;
+			s_FileFragmentsBuilt = 0;
+		}
+
+		if (s_FileFragmentsBuilt >= FILE_FRAGMENTS_PER_FRAME)
+			return NETCHAN_FILE_PENDING;
+	}
+#endif
+
 	Q_snprintf(compressedfilename, sizeof compressedfilename, "%s.ztmp", filename);
 	compressedFileTime = FS_GetFileTime(compressedfilename);
+
+#ifdef REHLDS_FIXES
+	// sv_filetransfer_async 1: a file without an up to date .ztmp is compressed by the
+	// compression thread (file_compressor.h), not here
+	qboolean compressHere = TRUE;
+	if (server && sv_filetransfercompression.value != 0.0f && sv_filetransfer_async.value != 0.0f)
+	{
+		int sourceTime = FS_GetFileTime(filename);
+		if (compressedFileTime < sourceTime)
+		{
+			switch (FileCompressor_Request(filename, compressedfilename, sourceTime, (unsigned int)sv_filetransfermaxsize.value))
+			{
+			case FILE_COMPRESSION_PENDING:
+				return NETCHAN_FILE_PENDING;
+			case FILE_COMPRESSION_DONE:
+				compressedFileTime = FS_GetFileTime(compressedfilename);
+				compressHere = FALSE;
+				break;
+			case FILE_COMPRESSION_FAILED:
+				compressHere = FALSE;
+				break;
+			default:
+				break;
+			}
+		}
+	}
+#endif
 	if (compressedFileTime >= FS_GetFileTime(filename) && (hfile = FS_Open(compressedfilename, "rb")))
 	{
 		filesize = FS_Size(hfile);
@@ -1361,7 +1525,11 @@ int Netchan_CreateFileFragments_(qboolean server, netchan_t *chan, const char *f
 		}
 
 		uncompressed_size = filesize;
+#ifdef REHLDS_FIXES
+		if (sv_filetransfercompression.value != 0.0 && compressHere)
+#else
 		if (sv_filetransfercompression.value != 0.0)
+#endif
 		{
 			unsigned char* uncompressed = (unsigned char*)Mem_Malloc(filesize);
 			unsigned char* compressed = (unsigned char*)Mem_Malloc(filesize);
@@ -1386,6 +1554,9 @@ int Netchan_CreateFileFragments_(qboolean server, netchan_t *chan, const char *f
 	FS_Close(hfile);
 
 	wait = (fragbufwaiting_t *)Mem_ZeroMalloc(0xCu);
+#ifdef REHLDS_FIXES
+	fragbuf_t *tail = nullptr;
+#endif
 	remaining = filesize;
 	pos = 0;
 
@@ -1437,8 +1608,17 @@ int Netchan_CreateFileFragments_(qboolean server, netchan_t *chan, const char *f
 		pos += send;
 		remaining -= send;
 
+#ifdef REHLDS_FIXES
+		Netchan_AppendFragbuf(wait, &tail, buf);
+#else
 		Netchan_AddFragbufToTail(wait, buf);
+#endif
 	}
+
+#ifdef REHLDS_FIXES
+	if (server)
+		s_FileFragmentsBuilt += wait->fragbufcount;
+#endif
 
 	if (!chan->waitlist[FRAG_FILE_STREAM])
 	{
@@ -2071,6 +2251,7 @@ void Netchan_Init(void)
 	Cvar_RegisterVariable(&net_drawslider);
 	Cvar_RegisterVariable(&sv_filetransfercompression);
 #ifdef REHLDS_FIXES
+	FileCompressor_Init();
 	Cvar_RegisterVariable(&sv_net_incoming_decompression);
 	Cvar_RegisterVariable(&sv_net_incoming_decompression_max_ratio);
 	Cvar_RegisterVariable(&sv_net_incoming_decompression_max_size);

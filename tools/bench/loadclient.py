@@ -17,6 +17,7 @@ usage: loadclient.py --server 127.0.0.1:27015 --clients 32 --duration 60 --outpu
 """
 
 import argparse
+import hashlib
 import bz2
 import json
 import math
@@ -216,6 +217,8 @@ class Netchan:
         self.reliable_buf = b""
         self.pending_reliable = []
         self.fragments = {}  # fragment id -> data, normal stream only
+        self.file_fragments = {}  # file stream (downloads)
+        self.files = []  # downloads completed: (name, data)
 
     def queue_reliable(self, data):
         self.pending_reliable.append(data)
@@ -300,8 +303,26 @@ class Netchan:
                 removed += length
                 if stream == 0 and fragid:
                     completed = self._add_fragment(fragid, chunk) or completed
+                elif stream == 1 and fragid:
+                    self._add_file_fragment(fragid, chunk)
             data = body
         return data, completed
+
+    def _add_file_fragment(self, fragid, chunk):
+        index, count = fragid >> 16, fragid & 0xFFFF
+        self.file_fragments[index] = chunk
+        if len(self.file_fragments) == count and all(i in self.file_fragments for i in range(1, count + 1)):
+            buf = b"".join(self.file_fragments[i] for i in range(1, count + 1))
+            self.file_fragments = {}
+            name, pos = read_string(buf, 0)
+            kind, pos = read_string(buf, pos)
+            size = struct.unpack_from("<i", buf, pos)[0]
+            data = buf[pos + 4:]
+            if kind == "bz2":
+                data = bz2.decompress(data)
+            if len(data) != size:
+                name += f" (size {len(data)}, expected {size})"
+            self.files.append((name, data))
 
     def _add_fragment(self, fragid, chunk):
         index, count = fragid >> 16, fragid & 0xFFFF
@@ -355,8 +376,12 @@ def parse_serverinfo(buf):
 
 
 class Client:
-    def __init__(self, index, server, cmdrate, stats, play=False):
+    def __init__(self, index, server, cmdrate, stats, play=False, download=None):
         self.index = index
+        # File asked for during the sign-on (dlfile), as a client missing a resource
+        # does; the server refuses it once the client is fully connected
+        self.download = download
+        self.download_logged = False
         self.server = server
         self.cmdrate = cmdrate
         self.stats = stats
@@ -417,8 +442,13 @@ class Client:
         if not self.netchan:
             return
 
-        decode = self.state != "ingame"
+        # A download goes on after the sign-on: keep reading its fragments
+        decode = self.state != "ingame" or (self.download is not None and not self.netchan.files)
         _, completed = self.netchan.process(packet, decode)
+        if self.download is not None and self.netchan.files and not self.download_logged:
+            name, data = self.netchan.files[0]
+            self.log(f"downloaded {name}: {len(data)} bytes, md5 {hashlib.md5(data).hexdigest()}")
+            self.download_logged = True
 
         if self.state == "ingame":
             if self.last_receive is not None:
@@ -445,6 +475,9 @@ class Client:
             self.stringcmd("sendres")
             self.set_state("sendres", now)
         elif self.state == "sendres":
+            if self.download:
+                self.stringcmd(f"dlfile {self.download}")
+                self.log(f"downloading {self.download}")
             self.stringcmd(f"spawn {self.spawn_args}")
             self.set_state("spawn", now)
         elif self.state == "spawn":
@@ -603,6 +636,14 @@ def main():
                         help="wall clock time (epoch seconds) at which measuring starts, instead of --warmup")
     parser.add_argument("--duration", type=float, default=30.0, help="measured seconds")
     parser.add_argument("--output", help="write the JSON summary to this file")
+    parser.add_argument("--download", help="file the last --download-clients clients ask for during the "
+                        "sign-on (dlfile), e.g. maps/de_inferno.bsp: the server sends it through the "
+                        "game connection")
+    parser.add_argument("--download-clients", type=int, default=0,
+                        help="how many clients, the last ones, download --download")
+    parser.add_argument("--download-at", type=float,
+                        help="wall clock time (epoch seconds) at which the downloading clients connect, "
+                             "all together; default with the others")
     parser.add_argument("--play", action="store_true",
                         help="join a team for real (close the message of the day first), so that "
                              "the clients spawn as players; without it they stay dead")
@@ -611,7 +652,9 @@ def main():
     host, port = args.server.rsplit(":", 1)
     server = (socket.gethostbyname(host), int(port))
     stats = {"ingame": 0, "failed": 0}
-    clients = [Client(i + 1, server, args.cmdrate, stats, args.play) for i in range(args.clients)]
+    first_download = args.clients - args.download_clients if args.download else args.clients
+    clients = [Client(i + 1, server, args.cmdrate, stats, args.play,
+                      args.download if i >= first_download else None) for i in range(args.clients)]
 
     sel = selectors.DefaultSelector()
     for c in clients:
@@ -619,6 +662,10 @@ def main():
 
     start = time.monotonic()
     connect_times = [start + i * args.stagger for i in range(len(clients))]
+    if args.download and args.download_at is not None:
+        download_start = start + max(0.0, args.download_at - time.time())
+        for i in range(first_download, len(clients)):
+            connect_times[i] = download_start
     measure_start = None
     measure_end = None
 
