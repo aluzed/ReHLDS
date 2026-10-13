@@ -132,6 +132,7 @@ private:
 		float maxQueriesSec;
 		float maxQueriesSecGlobal;
 		float maxQueriesWindow;
+		float maxChallengesSec;
 		std::vector<FilterEntry> entries;
 
 		bool dropUnknownAddresses;
@@ -148,6 +149,7 @@ private:
 		float maxQueriesSec;
 		float maxQueriesSecGlobal;
 		float maxQueriesWindow;
+		float maxChallengesSec;
 		int filtersVersion;
 		int numFilters;
 		bool preprocessHooked;
@@ -240,6 +242,7 @@ private:
 	uint32 m_SeenConfigVersion;
 	CIPRateLimit m_RateLimit;
 	CIPRateLimit m_QueryRateLimit;
+	A2SChallengeLimit m_ChallengeLimit;
 	uint64 m_ChallengeKey[2];	// written before the thread starts
 	uint32 m_NextSplitSequence;
 	unsigned char m_ReplyPacket[MAX_ROUTEABLE_PACKET];
@@ -256,6 +259,7 @@ private:
 	std::atomic<uint32> m_BanReplies;
 	std::atomic<uint32> m_Answered[A2SQ_COUNT];
 	std::atomic<uint32> m_ChallengesSent;
+	std::atomic<uint32> m_ChallengesLimited;	// also counted in the rate limited drops
 	std::atomic<uint32> m_RecvErrors;
 	std::atomic<uint32> m_MaxQueueDepth;
 };

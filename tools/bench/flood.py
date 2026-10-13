@@ -3,12 +3,19 @@
 on a public server.
 
 usage: flood.py --server 127.0.0.1:27015 --kind a2s --pps 50000 --sources 1024
-                [--start-at <epoch>] [--duration 30] [--output flood.json]
+                [--source-prefix 127.2] [--start-at <epoch>] [--duration 30]
+                [--output flood.json]
 
 Packets come from --sources different addresses (127.2.x.y, any 127.0.0.0/8
 address is local on Linux), so that per-address rate limits alone do not stop
 the flood. Replies are counted: they show how much of the flood the server
 still processes.
+
+The server answers loopback addresses without a challenge, like Steam. To flood
+it like from the Internet, with spoofed addresses, give a non-loopback prefix
+(--source-prefix 10.99, --server <container address>:27015): the sockets then
+bind with IP_TRANSPARENT, which needs root (or CAP_NET_RAW). The server's replies
+to these addresses leave the host, so none are counted.
 
 Kinds:
   a2s        A2S_INFO queries ("TSource Engine Query")
@@ -31,12 +38,15 @@ PAYLOADS = {
 }
 
 
-def source_address(index):
+IP_TRANSPARENT = 19
+
+
+def source_address(prefix, index):
     # Last octet in 1..254, up to 65024 addresses
-    return f"127.2.{index // 254}.{index % 254 + 1}"
+    return f"{prefix}.{index // 254}.{index % 254 + 1}"
 
 
-def open_sockets(count):
+def open_sockets(count, prefix):
     # One socket per source address: raise the open file limit to the hard limit
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     if soft != resource.RLIM_INFINITY and soft < count + 64:
@@ -44,7 +54,10 @@ def open_sockets(count):
     sockets = []
     for i in range(count):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.bind((source_address(i), 0))
+        if not prefix.startswith("127."):
+            # Send from addresses that are not the host's
+            s.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+        s.bind((source_address(prefix, i), 0))
         s.setblocking(False)
         sockets.append(s)
     return sockets
@@ -68,6 +81,7 @@ def main():
     parser.add_argument("--kind", choices=["a2s", "challenge", "junk"], default="a2s")
     parser.add_argument("--pps", type=int, default=50000, help="packets per second")
     parser.add_argument("--sources", type=int, default=1024, help="number of source addresses")
+    parser.add_argument("--source-prefix", default="127.2", help="first two octets of the source addresses")
     parser.add_argument("--start-at", type=float, default=0.0, help="epoch time to start at")
     parser.add_argument("--duration", type=float, default=30.0)
     parser.add_argument("--output")
@@ -75,7 +89,7 @@ def main():
 
     host, port = args.server.rsplit(":", 1)
     target = (host, int(port))
-    sockets = open_sockets(args.sources)
+    sockets = open_sockets(args.sources, args.source_prefix)
 
     if args.kind == "junk":
         payloads = [os.urandom(random.randint(16, 64)) for _ in range(256)]

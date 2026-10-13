@@ -80,6 +80,15 @@ How it works:
 * With the cache on, every A2S query the thread sees is counted in its own rate limiter
   (same `max_queries_*` values): queries no longer use up the budget of connection
   attempts. Queries without a captured answer yet go to the main thread (Steam).
+* Queries that get a challenge are counted in a separate limiter (`A2SChallengeLimit`):
+  per address `max_queries_sec` over `max_queries_window` like `CIPRateLimit`, and for
+  all addresses `sv_a2s_challenges_sec` per second (default 0: no cap). Addresses are
+  tracked in a fixed 65 536-entry table indexed by a keyed hash (1 MB, allocated when
+  the thread starts): a flood from random addresses neither grows it (`CIPRateLimit`'s
+  tree only trims entries idle for 120 s) nor evicts an address over its limit, which
+  keeps refusing the address it shares its entry with until its window ends. Answers
+  keep the previous limiter (`max_queries_*`), only for loopback queries and queries
+  with a valid challenge, which spoofed addresses cannot have.
 * A plugin hooking `PreprocessPacket` or the connectionless rate limits turns it off
   (not tested with such a plugin).
 
@@ -98,8 +107,17 @@ Results (`tools/bench`, Ryzen 9 3950X):
 * **Flood** (50 000 A2S_INFO/s from 4096 loopback addresses, 5 bots): a player's
   `getchallenge` is answered 5/5 with the cache, 0/5 without (the flood used up the
   global connectionless budget). The server stays invisible to browsers in both cases:
-  the global query budget is used up by the flood. The network thread's queue to the
-  main thread stays at depth 1 (196 without).
+  loopback queries are answered without a challenge, so the flood uses up the answers'
+  global budget. The network thread's queue to the main thread stays at depth 1 (196
+  without). Loopback sources cannot come from the network: this is the worst case, not
+  the usual one.
+* **Spoofed flood** (same, from 4096 addresses in 10.99.0.0/16 sent with
+  `IP_TRANSPARENT`, `flood.py --source-prefix`): without the cache, browsers 0/5 per
+  query type and `getchallenge` 0/5; with it, browsers 5/5 per query type (0.3 to 0.4 ms
+  median) and `getchallenge` 5/5. 803 021 challenges sent in 40 s, 1 140 844 refused by
+  the per address limit (each address sent about 12 queries/s); about 3 % of the flood
+  dropped by the kernel before the thread read it (none without the cache, which sends
+  nothing).
 * **Tick under flood** (`flood-a2s`, 32 clients, 3 runs each): jitter 14.8 / 17.9 /
   18.5 µs without, 22.1 / 15.4 / 19.6 µs with, main thread CPU 8.1–8.5 % in both, Steam
   phase 5.2–5.7 µs per frame in both: no difference beyond run-to-run noise.
@@ -109,10 +127,8 @@ Results (`tools/bench`, Ryzen 9 3950X):
 
 Not done, to decide:
 
-* Visibility during a flood: the global budget is shared by the flood and the real
-  browsers. With spoofed sources (the usual case), the flood only gets challenges;
-  challenges could get a separate, larger budget so that real browsers still get
-  through. Trade-off: outgoing traffic (9-byte challenges, no amplification) to the
-  spoofed addresses.
+* `sv_a2s_challenges_sec` defaults to no cap, so that browsers get through any spoofed
+  flood: the outgoing traffic is at most the flood's, in fewer bytes. A cap is for
+  hosts that pay for or limit their upload.
 * Windows code written (random key from `CryptGenRandom`) but not built.
 * Not tested with a plugin hooking `PreprocessPacket`, nor on the field validation server.

@@ -98,6 +98,7 @@ bool CNetReceiveThread::FilterInputs::operator==(const FilterInputs &other) cons
 		&& filterBan == other.filterBan
 		&& maxQueriesSec == other.maxQueriesSec
 		&& maxQueriesSecGlobal == other.maxQueriesSecGlobal
+		&& maxChallengesSec == other.maxChallengesSec
 		&& maxQueriesWindow == other.maxQueriesWindow
 		&& filtersVersion == other.filtersVersion
 		&& numFilters == other.numFilters
@@ -143,6 +144,7 @@ CNetReceiveThread::CNetReceiveThread() :
 		m_QueryDemand[i].store(false, std::memory_order_relaxed);
 	}
 	m_ChallengesSent.store(0, std::memory_order_relaxed);
+	m_ChallengesLimited.store(0, std::memory_order_relaxed);
 	m_ChallengeKey[0] = m_ChallengeKey[1] = 0;
 
 	// Statistics are relaxed atomics, read by the main thread for display only
@@ -153,6 +155,7 @@ CNetReceiveThread::CNetReceiveThread() :
 	RACE_BENIGN(&m_MaxQueueDepth, sizeof(m_MaxQueueDepth), "statistics");
 	RACE_BENIGN(m_Answered, sizeof(m_Answered), "statistics");
 	RACE_BENIGN(&m_ChallengesSent, sizeof(m_ChallengesSent), "statistics");
+	RACE_BENIGN(&m_ChallengesLimited, sizeof(m_ChallengesLimited), "statistics");
 
 	// Hint for the main thread, which captures an answer when a query arrived
 	RACE_BENIGN(m_QueryDemand, sizeof(m_QueryDemand), "flag");
@@ -251,7 +254,10 @@ void CNetReceiveThread::Start(SOCKET serverSocket, SOCKET serverSocketIpx)
 	m_Queue.Clear();
 	m_Config.reset();
 	if (!m_ChallengeKey[0] && !m_ChallengeKey[1])
+	{
 		A2S_RandomKey(m_ChallengeKey);
+		m_ChallengeLimit.SetKey(m_ChallengeKey);
+	}
 	m_SeenConfigVersion = m_ConfigVersion.load();
 
 	// The answers published before a restart (new sockets) are still valid
@@ -396,6 +402,7 @@ CNetReceiveThread::FilterInputs CNetReceiveThread::CurrentInputs() const
 	inputs.maxQueriesSec = max_queries_sec.value;
 	inputs.maxQueriesSecGlobal = max_queries_sec_global.value;
 	inputs.maxQueriesWindow = max_queries_window.value;
+	inputs.maxChallengesSec = sv_a2s_challenges_sec.value;
 	inputs.filtersVersion = ipfilters_version;
 	inputs.numFilters = numipfilters;
 	inputs.preprocessHooked = !g_RehldsHookchains.m_PreprocessPacket.isEmpty();
@@ -413,6 +420,7 @@ void CNetReceiveThread::PublishConfig(const FilterInputs &inputs)
 	config->maxQueriesSec = inputs.maxQueriesSec;
 	config->maxQueriesSecGlobal = inputs.maxQueriesSecGlobal;
 	config->maxQueriesWindow = inputs.maxQueriesWindow;
+	config->maxChallengesSec = inputs.maxChallengesSec;
 	config->dropUnknownAddresses = inputs.filterEnabled && !inputs.preprocessHooked;
 	config->numClients = m_NumClients;
 	Q_memcpy(config->clients, m_Clients, m_NumClients * sizeof(ClientAddress));
@@ -722,18 +730,31 @@ int CNetReceiveThread::Classify(const unsigned char *data, int size, const netad
 		if (!m_QueryDemand[query].load(std::memory_order_relaxed))
 			m_QueryDemand[query].store(true, std::memory_order_relaxed);
 
-		if (!m_QueryRateLimit.CheckIP(from, (time_t)time(nullptr), config->maxQueriesSec, config->maxQueriesSecGlobal, config->maxQueriesWindow))
+		// Like Steam: answers go to addresses that proved they receive packets,
+		// except loopback ones, which cannot be spoofed from the network
+		bool hasReply = HasReply(query, now);
+		bool needsChallenge = hasReply && from.ip[0] != 127 && !IsValidChallenge(from, challenge, now);
+
+		// Challenges and answers have separate budgets: a spoofed flood only gets
+		// challenges, and leaves the answers to the addresses that proved theirs
+		if (needsChallenge)
+		{
+			if (!m_ChallengeLimit.Check(*(const uint32 *)from.ip, now, config->maxQueriesSec, config->maxQueriesWindow, config->maxChallengesSec))
+			{
+				Count(m_ChallengesLimited);
+				return NTD_RATE_LIMITED;
+			}
+		}
+		else if (!m_QueryRateLimit.CheckIP(from, (time_t)time(nullptr), config->maxQueriesSec, config->maxQueriesSecGlobal, config->maxQueriesWindow))
 			return NTD_RATE_LIMITED;
 
 		if (IsBanned(from, now))
 			return NTD_BANNED;
 
-		if (HasReply(query, now))
+		if (hasReply)
 		{
-			// Like Steam: answers go to addresses that proved they receive packets,
-			// except loopback ones, which cannot be spoofed from the network
 			queryType = query;
-			sendChallenge = from.ip[0] != 127 && !IsValidChallenge(from, challenge, now);
+			sendChallenge = needsChallenge;
 		}
 
 		return NTD_NONE;
@@ -901,11 +922,12 @@ void CNetReceiveThread::Cmd_Stats()
 		Con_Printf("  dropped: %-12s %u\n", s_DropReasonNames[i], m_Dropped[i].load(std::memory_order_relaxed));
 	Con_Printf("  ban replies   %u\n", m_BanReplies.load(std::memory_order_relaxed));
 	Con_Printf("  recv errors   %u\n", m_RecvErrors.load(std::memory_order_relaxed));
-	Con_Printf("  A2S answered  info %u, players %u, rules %u, challenges %u\n",
+	Con_Printf("  A2S answered  info %u, players %u, rules %u, challenges %u (%u rate limited)\n",
 		m_Answered[A2SQ_INFO].load(std::memory_order_relaxed),
 		m_Answered[A2SQ_PLAYER].load(std::memory_order_relaxed),
 		m_Answered[A2SQ_RULES].load(std::memory_order_relaxed),
-		m_ChallengesSent.load(std::memory_order_relaxed));
+		m_ChallengesSent.load(std::memory_order_relaxed),
+		m_ChallengesLimited.load(std::memory_order_relaxed));
 	A2SCache_Stats();
 }
 

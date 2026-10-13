@@ -9,6 +9,7 @@
 #endif
 
 cvar_t sv_a2s_cache = { "sv_a2s_cache", "0", 0, 0.0f, nullptr };
+cvar_t sv_a2s_challenges_sec = { "sv_a2s_challenges_sec", "0", 0, 0.0f, nullptr };
 
 namespace
 {
@@ -320,9 +321,76 @@ void A2S_RandomKey(uint64 key[2])
 	}
 }
 
+A2SChallengeLimit::A2SChallengeLimit() :
+	m_GlobalSecond(0),
+	m_GlobalCount(0)
+{
+	m_Key[0] = m_Key[1] = 0;
+}
+
+void A2SChallengeLimit::SetKey(const uint64 key[2])
+{
+	// Allocated here rather than with the engine's globals: 1 MB that only servers
+	// answering queries on the network thread need. Another key places every address
+	// in another slot, so what the previous one placed is forgotten.
+	m_Key[0] = key[0] ^ 0x736C6F7473736C6Full;	// "slotsslo"
+	m_Key[1] = key[1];
+	m_Slots.assign(NUM_SLOTS, Slot());
+}
+
+bool A2SChallengeLimit::Check(uint32 ip, uint64 nowNs, float perIpSec, float windowSec, float globalSec)
+{
+	if (m_Slots.empty())
+		return false;
+
+	if (windowSec < 1.0f)
+		windowSec = 1.0f;
+
+	uint64 windowNs = (uint64)(windowSec * (float)NS_PER_SEC);
+
+	// Per address first, so that one address over its limit does not use up the
+	// budget of the others (same order as CIPRateLimit)
+	Slot &slot = m_Slots[SipHash(m_Key, ip) % NUM_SLOTS];
+	bool windowOver = slot.count == 0 || nowNs - slot.windowStartNs > windowNs;
+	if (slot.ip != ip && !windowOver && (float)slot.count / windowSec > perIpSec)
+		return false;
+
+	if (slot.ip != ip || windowOver)
+	{
+		slot.ip = ip;
+		slot.count = 1;
+		slot.windowStartNs = nowNs;
+	}
+	else
+	{
+		if (slot.count != 0xFFFFFFFF)
+			slot.count++;
+
+		if ((float)slot.count / windowSec > perIpSec)
+			return false;
+	}
+
+	if (globalSec <= 0.0f)
+		return true;
+
+	uint64 second = nowNs / NS_PER_SEC;
+	if (second != m_GlobalSecond)
+	{
+		m_GlobalSecond = second;
+		m_GlobalCount = 0;
+	}
+
+	if ((float)m_GlobalCount >= globalSec)
+		return false;
+
+	m_GlobalCount++;
+	return true;
+}
+
 void A2SCache_Init()
 {
 	Cvar_RegisterVariable(&sv_a2s_cache);
+	Cvar_RegisterVariable(&sv_a2s_challenges_sec);
 	Reset();
 	Q_memset(s_Captures, 0, sizeof(s_Captures));
 	Q_memset(s_Failures, 0, sizeof(s_Failures));

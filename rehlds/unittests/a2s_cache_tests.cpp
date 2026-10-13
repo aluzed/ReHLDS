@@ -110,3 +110,50 @@ TEST(SplitLikeNetSendLong, A2SCache, 1000)
 	CHECK("Second part header", !Q_memcmp(packet, secondHeader, sizeof(secondHeader)));
 	CHECK("Second part data", !Q_memcmp(packet + 9, answer + 1391, 1154));
 }
+
+TEST(ChallengeLimit, A2SCache, 1000)
+{
+	const uint64 key[2] = { 0x0123456789ABCDEFull, 0xFEDCBA9876543210ull };
+	const uint64 SEC = 1000000000ull;
+	const uint64 start = 1000 * SEC;
+
+	// Nothing goes through before a key is set
+	A2SChallengeLimit noKey;
+	CHECK("Challenge without a key", !noKey.Check(0x0100000A, start, 3.0f, 60.0f, 0.0f));
+
+	// Per address: 3 per second over 60 seconds, 180 per window
+	A2SChallengeLimit limit;
+	limit.SetKey(key);
+	for (int i = 0; i < 180; i++)
+		CHECK("Refused under the per address limit", limit.Check(0x0100000A, start, 3.0f, 60.0f, 0.0f));
+	CHECK("Allowed over the per address limit", !limit.Check(0x0100000A, start, 3.0f, 60.0f, 0.0f));
+	CHECK("Another address refused", limit.Check(0x0200000A, start, 3.0f, 60.0f, 0.0f));
+	CHECK("Refused before the window ends", !limit.Check(0x0100000A, start + 60 * SEC, 3.0f, 60.0f, 0.0f));
+	CHECK("Still refused after the window", limit.Check(0x0100000A, start + 61 * SEC, 3.0f, 60.0f, 0.0f));
+
+	// For all addresses: at most the global limit per second, from many addresses
+	A2SChallengeLimit global;
+	global.SetKey(key);
+	int allowed = 0;
+	for (uint32 ip = 1; ip <= 1000; ip++)
+		allowed += global.Check(ip, start, 3.0f, 60.0f, 100.0f) ? 1 : 0;
+	LONGS_EQUAL("Global limit", 100, allowed);
+	CHECK("Global limit not reset the next second", global.Check(2000, start + SEC, 3.0f, 60.0f, 100.0f));
+
+	// No global limit: a flood from random addresses all gets challenges
+	A2SChallengeLimit unlimited;
+	unlimited.SetKey(key);
+	allowed = 0;
+	for (uint32 ip = 1; ip <= 100000; ip++)
+		allowed += unlimited.Check(ip * 2654435761u, start, 3.0f, 60.0f, 0.0f) ? 1 : 0;
+	LONGS_EQUAL("Addresses refused without a global limit", 100000, allowed);
+
+	// An address over its limit stays refused while a flood of others goes through the table
+	A2SChallengeLimit victim;
+	victim.SetKey(key);
+	for (int i = 0; i < 181; i++)
+		victim.Check(0x0100000A, start, 3.0f, 60.0f, 0.0f);
+	for (uint32 ip = 1; ip <= 1000000; ip++)
+		victim.Check(ip * 2654435761u, start + SEC, 3.0f, 60.0f, 0.0f);
+	CHECK("Flood reset the limit of an address", !victim.Check(0x0100000A, start + 2 * SEC, 3.0f, 60.0f, 0.0f));
+}
