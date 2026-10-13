@@ -265,6 +265,7 @@ cvar_t sv_rehlds_local_gametime = {"sv_rehlds_local_gametime", "0", 0, 0.0f, nul
 cvar_t sv_rehlds_snapshot_spread = {"sv_rehlds_snapshot_spread", "1", 0, 0.0f, nullptr};
 cvar_t sv_parallel_send = {"sv_parallel_send", "1", 0, 0.0f, nullptr};
 cvar_t sv_steam_on_demand = {"sv_steam_on_demand", "1", 0, 0.0f, nullptr};
+cvar_t sv_client_lookup_cache = {"sv_client_lookup_cache", "1", 0, 0.0f, nullptr};
 cvar_t sv_rehlds_send_mapcycle = { "sv_rehlds_send_mapcycle", "0", 0, 0.0f, nullptr };
 cvar_t sv_rehlds_maxclients_from_single_ip = { "sv_rehlds_maxclients_from_single_ip", "5", 0, 5.0f, nullptr };
 cvar_t sv_use_entity_file = { "sv_use_entity_file", "0", 0, 0.0f, nullptr };
@@ -3979,6 +3980,76 @@ bool EXT_FUNC NET_GetPacketPreprocessor(uint8* data, unsigned int len, const net
 	return true;
 }
 
+#ifdef REHLDS_FIXES
+// sv_client_lookup_cache 1 (MT-104): the slot a game packet comes from, found through a
+// small table indexed by address instead of comparing the address of every slot. The
+// table is only a hint: the slot it gives is checked (connected, same address) before
+// it is used, and on a miss the slots are scanned as before and the table updated. A
+// stale entry (client gone, slot reused) can therefore never send a packet to the
+// wrong client. Unlike the scan, only the first slot with the address gets the packet;
+// two connected slots never share an address (a client reconnecting from its address
+// takes its slot back, SV_ConnectClient)
+namespace
+{
+	const int CLIENT_LOOKUP_SIZE = 256;	// power of two, several times MAX_CLIENTS
+
+	struct client_lookup_t
+	{
+		uint32 ip;
+		uint16 port;
+		int16 slot;		// -1: empty
+	};
+
+	client_lookup_t s_ClientLookup[CLIENT_LOOKUP_SIZE];
+	bool s_ClientLookupInit;
+
+	inline bool SV_IsClientConnectedForPackets(const client_t *cl)
+	{
+		return cl->connected || cl->active || cl->spawned;
+	}
+
+	inline client_lookup_t &SV_ClientLookupEntry(uint32 ip, uint16 port)
+	{
+		uint32 hash = (ip ^ ((uint32)port << 16 | port)) * 2654435761u;
+		return s_ClientLookup[(hash >> 24) & (CLIENT_LOOKUP_SIZE - 1)];
+	}
+}
+
+// The slot of the connected client with this address, -1 when there is none
+int SV_FindClientSlot(netadr_t &adr)
+{
+	if (!s_ClientLookupInit)
+	{
+		for (auto &entry : s_ClientLookup)
+			entry.slot = -1;
+		s_ClientLookupInit = true;
+	}
+
+	uint32 ip = *(const uint32 *)adr.ip;
+	client_lookup_t &entry = SV_ClientLookupEntry(ip, adr.port);
+	if (entry.slot >= 0 && entry.slot < g_psvs.maxclients && entry.ip == ip && entry.port == adr.port)
+	{
+		client_t *cl = &g_psvs.clients[entry.slot];
+		if (SV_IsClientConnectedForPackets(cl) && NET_CompareAdr(adr, cl->netchan.remote_address))
+			return entry.slot;
+	}
+
+	for (int i = 0; i < g_psvs.maxclients; i++)
+	{
+		client_t *cl = &g_psvs.clients[i];
+		if (!SV_IsClientConnectedForPackets(cl) || !NET_CompareAdr(adr, cl->netchan.remote_address))
+			continue;
+
+		entry.ip = ip;
+		entry.port = adr.port;
+		entry.slot = (int16)i;
+		return i;
+	}
+
+	return -1;
+}
+#endif // REHLDS_FIXES
+
 void SV_ReadPackets(void)
 {
 #ifdef REHLDS_FIXES
@@ -4027,7 +4098,22 @@ void SV_ReadPackets(void)
 			continue;
 		}
 
+#ifdef REHLDS_FIXES
+		int firstSlot = 0;
+		int endSlot = g_psvs.maxclients;
+		if (sv_client_lookup_cache.value != 0.0f)
+		{
+			firstSlot = SV_FindClientSlot(net_from);
+			if (firstSlot < 0)
+				continue;
+
+			endSlot = firstSlot + 1;
+		}
+
+		for (int i = firstSlot; i < endSlot; i++)
+#else
 		for (int i = 0 ; i < g_psvs.maxclients; i++)
+#endif
 		{
 			client_t *cl = &g_psvs.clients[i];
 			if (!cl->connected && !cl->active && !cl->spawned)
@@ -9021,6 +9107,7 @@ void SV_Init(void)
 	Cvar_RegisterFeatureVariable(&sv_rehlds_snapshot_spread);
 	Cvar_RegisterFeatureVariable(&sv_parallel_send);
 	Cvar_RegisterFeatureVariable(&sv_steam_on_demand);
+	Cvar_RegisterFeatureVariable(&sv_client_lookup_cache);
 	Cvar_RegisterVariable(&sv_rehlds_send_mapcycle);
 	Cvar_RegisterVariable(&sv_rehlds_maxclients_from_single_ip);
 

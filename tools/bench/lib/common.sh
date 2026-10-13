@@ -23,7 +23,7 @@ HLDS_DIR=$BENCH_DIR/hlds
 # The fork's optimisations are on by default: these arguments turn them all off, for
 # runs of the original engine behaviour
 ORIGINAL_ENGINE_ARGS=(-nonetthread -nonetsend -sys_threads 0 +sys_scheduler 0 +sv_rehlds_snapshot_spread 0
-	+sv_parallel_send 0 +sv_a2s_cache 0 +sv_log_async 0 +sv_steam_on_demand 0)
+	+sv_parallel_send 0 +sv_a2s_cache 0 +sv_log_async 0 +sv_steam_on_demand 0 +sv_client_lookup_cache 0)
 STEAM_HOME=$BENCH_DIR/home
 
 log() {

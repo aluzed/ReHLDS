@@ -30,6 +30,7 @@ With no option, the server runs with the field validated settings:
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
 | `sv_log_async` | MT-301 | 1 | 1 | Log files written on their own thread, see below |
 | `sv_log_async_overflow` | MT-301 | `block` | `block` | Full log queue: wait for room, or drop the line (`drop`) |
+| `sv_client_lookup_cache` | MT-104 | 1 | 1 | Client of a game packet found by address, not by scanning the slots |
 | `sv_steam_on_demand` | MT-306 | 1 | 1 | Fewer Steam calls on the main thread, see below |
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler (`sv_profile_enable 1` records continuously) |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
@@ -46,7 +47,7 @@ To run the original engine behaviour, for a comparison or to rule the fork out:
 ```sh
 ./hlds_run -game cstrike -nonetthread -nonetsend -sys_threads 0 +sys_scheduler 0 \
     +sv_rehlds_snapshot_spread 0 +sv_parallel_send 0 +sv_a2s_cache 0 +sv_log_async 0 \
-    +sv_steam_on_demand 0 +map de_dust2
+    +sv_steam_on_demand 0 +sv_client_lookup_cache 0 +map de_dust2
 ```
 
 The Windows testsuite (`--rehlds-test-record`, `--rehlds-test-play`) runs with all of them off: it

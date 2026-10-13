@@ -22,12 +22,13 @@ network and send threads, two encoding workers, A2S cache, asynchronous logs, St
 - `sv_a2s_cache`: with the network thread, server browser queries answered on that thread from a copy of Steam's answers, with its own challenges; answers in 0.1 ms instead of 12 ms, and players can still connect during a query flood. Challenges have their own budget (`sv_a2s_challenges_sec`), so the server stays visible during a flood from spoofed addresses. (MT-305).
 - `sv_log_async`, `sv_log_async_overflow`, `sv_log_async_stats`: server log file and `qconsole.log` written on a dedicated thread (MT-301).
 - `sv_steam_on_demand`: Steam's outgoing packets read after a packet was handed to Steam and every 100 ms, instead of every 10 ms, and player names and scores sent to Steam only when they change; the Steam phase of the frame goes from 4.6 to 1.0 ms per second with 19 bots (MT-306).
+- `sv_client_lookup_cache`: the client a game packet comes from found through a table indexed by address, each result checked against the slot, instead of comparing every slot's address; packet dispatch 624 -> 502 ns per packet with 32 clients (MT-104).
 - `sys_wake_on_packet`: with the network thread and the scheduler, packets read as they arrive between ticks; takes player movement out of the tick, does not lower the latency players see (MT-102).
 - `-netrecord`, `-netreplay`, `-netsends`: byte-exact session record and replay for regression checks (MT-004).
 - `tools/bench/`: Docker load tests (bots, protocol clients with input latency measurement, HLTV, floods), replay regression, Helgrind race checks and map change checks with Metamod; `tools/staging/`: field validation server (MT-003, MT-004, MT-702).
 
 ### Changed
-- The field validated optimisations are on by default: `sys_scheduler`, `sv_rehlds_snapshot_spread`, `sv_parallel_send`, `sv_a2s_cache`, `sv_log_async` and `sv_steam_on_demand` default to 1, the network and send threads start unless `-nonetthread` / `-nonetsend`, and two encoding workers start unless `-sys_threads 0` (fewer on a machine with fewer than 3 CPUs). `-netthread` and `-netsend` are still accepted. The Windows testsuite runs with all of them off.
+- The field validated optimisations are on by default: `sys_scheduler`, `sv_rehlds_snapshot_spread`, `sv_parallel_send`, `sv_a2s_cache`, `sv_log_async`, `sv_steam_on_demand` and `sv_client_lookup_cache` default to 1, the network and send threads start unless `-nonetthread` / `-nonetsend`, and two encoding workers start unless `-sys_threads 0` (fewer on a machine with fewer than 3 CPUs). `-netthread` and `-netsend` are still accepted. The Windows testsuite runs with all of them off.
 
 ### Fixed
 - `sv_parallel_send 1` with Metamod: the game DLL's conditional encoders ran Metamod's callbacks on the encoding threads while the main thread ran game DLL code, which corrupted the heap; the server crashed at the next map change. Never released (MT-404).
