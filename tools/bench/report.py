@@ -190,6 +190,15 @@ def main():
     if main_cpu is not None:
         base_main_cpu = base.main_thread_cpu_percent if base else None
         print(f"| Main thread CPU | {cell(main_cpu, base_main_cpu)} % of one core |")
+    # Every other thread of the server: network, send, encoding workers, log writer
+    for key in sorted(k for k in run.cpu if k.startswith("thread_") and k.endswith("_ticks")):
+        name = key[len("thread_"):-len("_ticks")]
+        if name == "hlds_linux":
+            continue
+        share = run.cpu_share(key)
+        base_share = base.cpu_share(key) if base and key in base.cpu else None
+        if share is not None:
+            print(f"| Thread {name} CPU | {cell(share, base_share)} % of one core |")
     print()
 
     if run.flood:

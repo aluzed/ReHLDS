@@ -24,6 +24,9 @@ tools/bench/report.py .bench/results/<mychange run> --baseline .bench/results/<b
 frame), `server.log`, `hltv-*.log`, `cpu.txt` (process and main thread), `meta.txt`, and
 `clients.json` / `flood.json` when the scenario has load clients or a flood.
 
+`cpu.txt` and the report also give the CPU of every server thread over the measurement
+(network, send, encoding workers, log writer, Steam), in % of one core.
+
 Set `BENCH_DOCKER_ARGS`, e.g. `--cpuset-cpus=6,7`, to pass extra options to `docker run`,
 and `BENCH_SERVER_ARGS`, e.g. `+sys_scheduler 1`, to append arguments to the server command line.
 

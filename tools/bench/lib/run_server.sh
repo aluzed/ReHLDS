@@ -39,6 +39,13 @@ SERVER_COMMANDS=
 FINAL_COMMANDS=
 . "$scenario"
 
+# utime + stime of every thread: "<tid> <name> <ticks>" lines, names made shell-safe
+thread_ticks() {
+	for task in /proc/"$1"/task/*; do
+		echo "${task##*/} $(tr -c 'A-Za-z0-9\n-' _ < "$task/comm") $(awk '{ print $14 + $15 }' "$task/stat")"
+	done 2> /dev/null | sort
+}
+
 cpu_ticks() {
 	# utime + stime, fields 14 and 15 of /proc/<pid>/stat
 	awk '{ print $14 + $15 }' "/proc/$1/stat"
@@ -126,11 +133,13 @@ send status
 
 ticks_start=$(cpu_ticks "$server_pid")
 main_ticks_start=$(cpu_ticks "$server_pid/task/$server_pid")
+threads_start=$(thread_ticks "$server_pid")
 time_start=$(date +%s.%N)
 send "sv_profile $DURATION"
 sleep "$DURATION"
 ticks_end=$(cpu_ticks "$server_pid")
 main_ticks_end=$(cpu_ticks "$server_pid/task/$server_pid")
+threads_end=$(thread_ticks "$server_pid")
 time_end=$(date +%s.%N)
 
 # Let the profiler finish its capture and print the report
@@ -153,6 +162,7 @@ rm -f "$fifo"
 cat > "$out/cpu.txt" <<EOF
 cpu_ticks=$((ticks_end - ticks_start))
 main_thread_cpu_ticks=$((main_ticks_end - main_ticks_start))
+$(join <(echo "$threads_start") <(echo "$threads_end") | awk '{ ticks[$2] += $5 - $3 } END { for (n in ticks) if (ticks[n] > 0) print "thread_" n "_ticks=" ticks[n] }' | sort)
 clk_tck=$(getconf CLK_TCK)
 wall_start=$time_start
 wall_end=$time_end
