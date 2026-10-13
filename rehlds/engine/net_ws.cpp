@@ -1334,6 +1334,18 @@ void NET_FlushQueues()
 	normalqueue = NULL;
 }
 
+// One datagram, as it goes out on the wire
+static int NET_SendDatagram(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, const struct sockaddr *to, int tolen)
+{
+#ifdef REHLDS_FIXES
+	// -netsend: the send thread hands it to the kernel (net_send_thread.cpp)
+	if (sock == NS_SERVER && !flags && g_NetSendThread.Send(s, buf, len, to, tolen))
+		return len;
+#endif
+
+	return CRehldsPlatformHolder::get()->sendto(s, buf, len, flags, to, tolen);
+}
+
 int NET_SendLong(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, const struct sockaddr *to, int tolen)
 {
 	static long gSequenceNumber = 1;
@@ -1379,7 +1391,7 @@ int NET_SendLong(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, c
 					NET_AdrToString(adr));
 			}
 
-			int ret = CRehldsPlatformHolder::get()->sendto(s, packet, size + sizeof(SPLITPACKET), flags, to, tolen);
+			int ret = NET_SendDatagram(sock, s, packet, size + sizeof(SPLITPACKET), flags, to, tolen);
 			if (ret < 0)
 			{
 				return ret;
@@ -1397,7 +1409,7 @@ int NET_SendLong(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, c
 		return totalSent;
 	}
 
-	int nSend = CRehldsPlatformHolder::get()->sendto(s, buf, len, flags, to, tolen);
+	int nSend = NET_SendDatagram(sock, s, buf, len, flags, to, tolen);
 	return nSend;
 }
 
@@ -1943,13 +1955,15 @@ void NET_Config(qboolean multiplayer)
 #else
 		g_NetReceiveThread.Start(ip_sockets[NS_SERVER], INV_SOCK);
 #endif
+		g_NetSendThread.Start(ip_sockets[NS_SERVER]);
 #endif
 	}
 	else
 	{
 #ifdef REHLDS_FIXES
-		// The thread must not wait on sockets that are being closed
+		// The threads must not use sockets that are being closed
 		g_NetReceiveThread.Stop();
+		g_NetSendThread.Stop();
 #endif
 
 		NET_ThreadLock();
@@ -2041,6 +2055,8 @@ void NET_Init()
 #ifdef REHLDS_FIXES
 	// -netthread starts the cross-platform receive thread (net_receive_thread.cpp)
 	NetReceiveThread_Init();
+	// -netsend starts the send thread (net_send_thread.cpp)
+	NetSendThread_Init();
 #else
 	if (COM_CheckParm("-netthread"))
 		use_thread = TRUE;

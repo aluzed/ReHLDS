@@ -3983,6 +3983,8 @@ void SV_ReadPackets(void)
 #ifdef REHLDS_FIXES
 	if (g_NetReceiveThread.IsRunning())
 		g_NetReceiveThread.BeginFrame();
+	if (g_NetSendThread.IsRunning())
+		g_NetSendThread.ReportErrors();
 #endif
 
 	while (NET_GetPacket(NS_SERVER))

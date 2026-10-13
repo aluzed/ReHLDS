@@ -28,7 +28,7 @@ dll_args=()
 valgrind --tool="$tool" --log-file="$out/$tool.log" --error-limit=no \
 	./hlds_linux -game cstrike "${dll_args[@]}" -console -port 27015 +sv_lan 1 +maxplayers 8 -netthread -sys_threads 2 +sv_parallel_send 1 \
 	+sys_ticrate 100 +mp_consistency 0 +sv_rehlds_maxclients_from_single_ip 8 \
-	+max_queries_sec 1000 +max_queries_sec_global 100000 +map de_dust2 \
+	+max_queries_sec 1000 +max_queries_sec_global 100000 ${BENCH_SERVER_ARGS:-} +map de_dust2 \
 	< "$fifo" > "$out/server.log" 2>&1 &
 server_pid=$!
 
@@ -61,6 +61,7 @@ send "removeip 127.2.0.0/24"
 sleep $((secs - 2 * (secs / 3)))
 send net_thread_stats
 send sv_parallel_send_stats
+send net_send_stats
 send status
 # Map change with the threads running and clients connected
 send "changelevel de_dust2"
