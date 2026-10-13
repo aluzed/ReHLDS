@@ -1,12 +1,44 @@
-# ReHLDS [![C/C++ CI](https://github.com/rehlds/ReHLDS/actions/workflows/build.yml/badge.svg)](https://github.com/rehlds/ReHLDS/actions/workflows/build.yml) [![GitHub release (by tag)](https://img.shields.io/github/downloads/rehlds/ReHLDS/latest/total)](https://github.com/rehlds/ReHLDS/releases/latest) ![GitHub all releases](https://img.shields.io/github/downloads/rehlds/ReHLDS/total) [![Percentage of issues still open](http://isitmaintained.com/badge/open/rehlds/ReHLDS.svg)](http://isitmaintained.com/project/rehlds/ReHLDS "Percentage of issues still open") [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://www.gnu.org/licenses/gpl-3.0)  [![CII Best Practices](https://bestpractices.dev/projects/10929/badge)](https://www.bestpractices.dev/en/projects/10929) <img align="right" src="https://user-images.githubusercontent.com/5860435/111066129-040e5e00-84f0-11eb-9e1f-7a7e8611da2b.png" alt="ReHLDS" />
-Reverse-engineered (and bugfixed) HLDS
+# ReHLDS multithreaded [![C/C++ CI](https://github.com/aluzed/ReHLDS/actions/workflows/build.yml/badge.svg?branch=feature%2Fmultithreading)](https://github.com/aluzed/ReHLDS/actions/workflows/build.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) <img align="right" src="https://user-images.githubusercontent.com/5860435/111066129-040e5e00-84f0-11eb-9e1f-7a7e8611da2b.png" alt="ReHLDS" />
+Reverse-engineered (and bugfixed) HLDS, with a multithreaded server loop
 
 ## What is this?
-ReHLDS is a result of reverse engineering of original HLDS (build 6152/6153) using DWARF debug info embedded into linux version of HLDS, engine_i486.so
+A fork of [ReHLDS](https://github.com/rehlds/ReHLDS) whose goal is a steadier, faster server
+tick: work that does not touch the game DLL (network input and output, query answers,
+snapshot encoding, log writing, Steam calls) moves off the main thread, and the frame is
+paced on an exact grid. Game DLL, Metamod, AMX Mod X and ReAPI code still runs on the main
+thread only, so mods and plugins keep working unchanged.
 
-Along with reverse engineering, a lot of defects and (potential) bugs were found and fixed
+ReHLDS itself is a result of reverse engineering of original HLDS (build 6152/6153) using
+DWARF debug info embedded into linux version of HLDS, engine_i486.so. Along with reverse
+engineering, a lot of defects and (potential) bugs were found and fixed.
 
-You can try playing on one of many servers that are using ReHLDS: [Game Tracker](http://www.gametracker.com/search/?search_by=server_variable&search_by2=sv_version)
+### What the fork adds
+All of it is on by default once validated on a public server with players, Metamod-R,
+AMX Mod X, ReAPI and CSDM; every part can be turned off (see
+[performance tuning](docs/performance-tuning.md)).
+
+| | Without | With |
+|---|---|---|
+| Server FPS at `sys_ticrate 1000` (idle) | 935.7 | 1000.0 |
+| Tick jitter (idle) | 14.4 µs | 4.6 µs |
+| Snapshots per client at `cl_updaterate 100` | 97.5 /s | 100.0 /s |
+| Main thread CPU during an A2S query flood | 16.4 % | 7.9 % (same as without a flood) |
+| Players connecting during a 50 000 queries/s spoofed flood | 0/5 | 5/5 |
+| Server browser answer | 12.1 ms | 0.09 ms |
+| Packet transmit phase, 32 players | 21 µs per frame | 3 µs per frame |
+
+* **Frame scheduler** (`sys_scheduler`): frames on a fixed grid of deadlines, exact `sys_ticrate`.
+* **Snapshot spreading** (`sv_rehlds_snapshot_spread`): each client's snapshots at a fixed phase, exact update rate.
+* **Network receive thread** (`-nonetthread` to disable): reads the socket and drops floods, banned addresses and junk before the game loop.
+* **Server browser answers on the network thread** (`sv_a2s_cache`), with their own rate limits and challenges.
+* **Network send thread** (`-nonetsend` to disable): packets handed to the kernel off the main thread, one `sendmmsg` per tick on Linux.
+* **Parallel snapshot encoding** (`-sys_threads`, `sv_parallel_send`): delta encoding on worker threads, byte-identical output; game DLL encoders run on the main thread and are replayed by the workers.
+* **Asynchronous log writer** (`sv_log_async`), **Steam calls on demand** (`sv_steam_on_demand`), **client lookup by address** (`sv_client_lookup_cache`).
+* **Tooling**: per-phase frame profiler (`sv_profile`), byte-exact session record and replay, Docker load tests, race and map change checks (`tools/bench/`), a field validation server (`tools/staging/`).
+
+Design notes and measurements for every change are in [`docs/stories/`](docs/stories/README.md);
+the field sessions are in [`docs/benchmarks/field-validation.md`](docs/benchmarks/field-validation.md).
+Windows builds have not been run on a server yet.
 
 > [!TIP]
 > ReHLDS linux-releases now is signed via `GPG`, pubkey is: `63547829004f07716f7be4856c32c4282e60fb67` and could be found at [https://keyserver.ubuntu.com/](https://keyserver.ubuntu.com/pks/lookup?search=63547829004f07716f7be4856c32c4282e60fb67+&fingerprint=on&op=index).
@@ -21,6 +53,7 @@ You can try playing on one of many servers that are using ReHLDS: [Game Tracker]
 <ul>
 <li>Provide more stable (than official) version of Half-Life dedicated server with extended API for mods and plugins</li>
 <li>Performance optimizations (use of SSE for vector math for example) is another goal for the future</li>
+<li>This fork: a steadier and faster tick by moving engine work that does not touch the game DLL off the main thread</li>
 </ul>
 
 ## 🛠 License
