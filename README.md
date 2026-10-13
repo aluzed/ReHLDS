@@ -123,6 +123,8 @@ This means that plugins that do binary code analysis (Orpheu for example) probab
 <li>-netthread // Read the server socket on a dedicated network thread, which filters floods and junk before they reach the game loop (see net_thread_filter). Default: off
 <li>-sys_threads &lt;N|auto&gt; // Start N worker threads (at most 8; auto: one per CPU but one) for sv_parallel_send. Default: 0 (none)
 <li>-netthread_queue &lt;64-16384&gt; // Size in packets of the queue between the network thread and the main thread. Default: 1024
+<li>-netsend // Send the server's packets from a dedicated thread: the game loop queues them instead of waiting for the kernel (one sendmmsg call for a tick's packets on Linux). Statistics: net_send_stats. Default: off
+<li>-netsend_queue &lt;64-16384&gt; // Size in packets of the queue between the main thread and the send thread. Default: 1024
 <li>-netrecord &lt;file&gt; // Record the inputs of the session (clock, packets, console) to replay it byte for byte. For developers, see [docs/benchmarks/replay.md](docs/benchmarks/replay.md)
 <li>-netreplay &lt;file&gt; // Replay a session recorded with -netrecord as fast as possible, without the network, then quit
 <li>-netsends &lt;file&gt; // With -netrecord or -netreplay, write every packet sent by the server to &lt;file&gt;

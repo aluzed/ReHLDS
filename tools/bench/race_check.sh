@@ -9,6 +9,8 @@
 #
 #   BENCH_HELGRIND=ON tools/bench/build.sh helgrind
 #   tools/bench/race_check.sh helgrind [seconds] [helgrind|drd]
+#
+# BENCH_SERVER_ARGS adds server arguments, e.g. BENCH_SERVER_ARGS=-netsend.
 set -euo pipefail
 . "$(dirname "$0")/lib/common.sh"
 

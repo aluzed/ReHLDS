@@ -21,6 +21,7 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `-netthread` | MT-302 | off | on | Network thread, the tick no longer sees floods |
 | `-netthread_queue` | MT-302 | 1024 | 1024 | Queue between the network thread and the game loop |
 | `net_thread_filter` | MT-303 | 1 | 1 | Early filtering on the network thread |
+| `-netsend`, `-netsend_queue` | MT-304 | off, 1024 | to decide after field validation | Packets sent from a dedicated thread |
 | `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers with spare cores: 2, 1 (under field validation) | Snapshots encoded on worker threads |
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
@@ -147,6 +148,24 @@ Network thread: running, queue 0/1024 packets (max 58), filter on
 `max` is the deepest the queue has been since startup. If `queue full` is not 0, the game
 loop was stalled for longer than the queue holds (a long map change, a plugin blocking):
 raise `-netthread_queue` (64–16384, rounded to a power of two).
+
+## Sending packets from a thread
+
+With `-netsend`, the game loop no longer hands each packet to the kernel itself: it
+copies it into a queue (split packets already split, so the wire format is unchanged),
+and a dedicated thread sends what is queued, in order, with one `sendmmsg` call on
+Linux. Measured with 32 players at 100 snapshots/s:
+
+| | Without | `-netsend` |
+|---|---|---|
+| Transmit phase, per frame | 21 µs | 3 µs |
+| Frame, average | 71 µs | 51 µs |
+| Main thread CPU | 7.6 % | 5.5 % |
+| Process CPU | 14.4 % | 15.2 % |
+
+The thread wakes up about once per frame. `net_send_stats` shows the packets sent, the
+system calls, the wake-ups, and how often the queue was full (should stay at 0; raise
+`-netsend_queue` otherwise).
 
 ## Reading packets on arrival
 

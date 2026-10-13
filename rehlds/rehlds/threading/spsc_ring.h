@@ -19,6 +19,9 @@
 //	T *slot = ring.Front();          // consumer, nullptr when empty
 //	... read *slot ...
 //	ring.Pop();
+//
+// The consumer can also read several queued elements before popping them all
+// (Peek(i) then Pop(n)), to hand them to one system call.
 template <typename T>
 class SpscRing
 {
@@ -117,8 +120,30 @@ public:
 
 	void Pop()
 	{
+		Pop(1);
+	}
+
+	// Element i in queue order (0 is Front()), nullptr when fewer are queued
+	T *Peek(size_t i)
+	{
+		size_t head = m_Head.load(std::memory_order_relaxed);
+		if (m_CachedTail - head <= i)
+		{
+			m_CachedTail = m_Tail.load(std::memory_order_acquire);
+			if (m_CachedTail - head <= i)
+				return nullptr;
+
+			RACE_HAPPENS_AFTER(&m_Tail);
+		}
+
+		return &m_Slots[(head + i) & m_Mask];
+	}
+
+	// Pops count elements, which the consumer has seen through Front or Peek
+	void Pop(size_t count)
+	{
 		RACE_HAPPENS_BEFORE(&m_Head);
-		m_Head.store(m_Head.load(std::memory_order_relaxed) + 1, std::memory_order_release);
+		m_Head.store(m_Head.load(std::memory_order_relaxed) + count, std::memory_order_release);
 	}
 
 	// Approximate number of queued elements, callable from either side

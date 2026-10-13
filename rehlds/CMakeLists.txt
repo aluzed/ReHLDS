@@ -182,6 +182,7 @@ set(ENGINE_SRCS
 	rehlds/hookchains_impl.cpp
 	rehlds/main.cpp
 	rehlds/net_receive_thread.cpp
+	rehlds/net_send_thread.cpp
 	rehlds/net_replay.cpp
 	rehlds/parallel_send.cpp
 	rehlds/platform.cpp
