@@ -1,42 +1,66 @@
 # Performance tuning
 
 How to get a steady tick and protect it from packet floods with the options added on the
-`feature/multithreading` branch. Every option is off by default: without them, the engine
-behaves like upstream ReHLDS. The measurements behind each recommendation are in
+`feature/multithreading` branch. The optimisations validated on the field server are on
+by default; the others stay off. The measurements behind each recommendation are in
 [`benchmarks/`](benchmarks/); the design is in [`stories/`](stories/README.md).
 
-## Recommended settings
+## Defaults
+
+With no option, the server runs with the field validated settings:
 
 ```sh
-./hlds_run -game cstrike -netthread +sys_ticrate 1000 +sys_scheduler 1 \
-    +sv_rehlds_snapshot_spread 1 +map de_dust2
+./hlds_run -game cstrike +sys_ticrate 1000 +map de_dust2
 ```
 
 | Option | Story | Default | Recommended | Effect |
 |---|---|---|---|---|
-| `sys_scheduler 1` | MT-101 | 0 | 1 | Exact `sys_ticrate`, tick jitter divided by 2.5 to 5 |
+| `sys_scheduler` | MT-101 | 1 | 1 | Exact `sys_ticrate`, tick jitter divided by 2.5 to 5 |
 | `sys_scheduler_slice` | MT-101 | 100 | 100 | Time (ms) between returns to the launcher |
 | `sys_spin_us` | MT-101 | 0 | 0 | Busy-wait before each tick, dedicated cores only |
-| `sv_rehlds_snapshot_spread 1` | MT-106 | 0 | 1 | Snapshots spread over the frames, exact update rate |
-| `-netthread` | MT-302 | off | on | Network thread, the tick no longer sees floods |
+| `sv_rehlds_snapshot_spread` | MT-106 | 1 | 1 | Snapshots spread over the frames, exact update rate |
+| `-nonetthread` | MT-302 | thread on | thread on | Network thread, the tick no longer sees floods |
 | `-netthread_queue` | MT-302 | 1024 | 1024 | Queue between the network thread and the game loop |
 | `net_thread_filter` | MT-303 | 1 | 1 | Early filtering on the network thread |
-| `-netsend`, `-netsend_queue` | MT-304 | off, 1024 | to decide after field validation | Packets sent from a dedicated thread |
-| `sv_a2s_cache` | MT-305 | 0 | to decide after field validation | Server browser queries answered by the network thread |
+| `-nonetsend`, `-netsend_queue` | MT-304 | thread on, 1024 | thread on, 1024 | Packets sent from a dedicated thread |
+| `sv_a2s_cache` | MT-305 | 1 | 1 | Server browser queries answered by the network thread |
 | `sv_a2s_challenges_sec` | MT-305 | 0 (no cap) | 0, or the upload a host can spare | Most challenges per second sent to browsers with `sv_a2s_cache 1` |
-| `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers with spare cores: 2, 1 (under field validation) | Snapshots encoded on worker threads |
+| `-sys_threads`, `sv_parallel_send` | MT-403, MT-404 | 2 (fewer with fewer than 3 CPUs), 1 | 2, 1 | Snapshots encoded on worker threads |
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
-| `sv_log_async` | MT-301 | 0 | to decide after field validation | Log files written on their own thread, see below |
-| `sv_steam_on_demand` | – | 1 | 1 | Fewer Steam calls on the main thread, see below |
-| `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler |
+| `sv_log_async` | MT-301 | 1 | 1 | Log files written on their own thread, see below |
+| `sv_log_async_overflow` | MT-301 | `block` | `block` | Full log queue: wait for room, or drop the line (`drop`) |
+| `sv_steam_on_demand` | MT-306 | 1 | 1 | Fewer Steam calls on the main thread, see below |
+| `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler (`sv_profile_enable 1` records continuously) |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
 
-`sys_scheduler` and `sv_rehlds_snapshot_spread` can be changed at any time from the
-console or `server.cfg`; `-netthread` is a command-line parameter only.
+The cvars can be changed at any time from the console or `server.cfg` (`sv_log_async`
+at the next log file); the threads are started once, from the command line:
+`-nonetthread`, `-nonetsend` and `-sys_threads 0` keep them off. `-netthread` and
+`-netsend`, which started them when they were off by default, are still accepted.
+`sys_ticrate` keeps its usual default: the recommended `1000` costs CPU and is the
+operator's choice.
 
-These three options were validated on a public server with players (Metamod-R, AMX Mod X,
-ReAPI, ReGameDLL_CS): see [`benchmarks/field-validation.md`](benchmarks/field-validation.md).
+To run the original engine behaviour, for a comparison or to rule the fork out:
+
+```sh
+./hlds_run -game cstrike -nonetthread -nonetsend -sys_threads 0 +sys_scheduler 0 \
+    +sv_rehlds_snapshot_spread 0 +sv_parallel_send 0 +sv_a2s_cache 0 +sv_log_async 0 \
+    +sv_steam_on_demand 0 +map de_dust2
+```
+
+The Windows testsuite (`--rehlds-test-record`, `--rehlds-test-play`) runs with all of them off: it
+replays the system and Steam calls in their original order. The default settings ran
+on a public server with players, 19 bots and Metamod-R, AMX Mod X, ReAPI and CSDM: see
+[`benchmarks/field-validation.md`](benchmarks/field-validation.md). They have not run on
+a Windows server.
+
+### Counters
+
+Each thread prints its counters on demand: `net_thread_stats` (network thread, A2S
+answers), `net_send_stats` (send thread), `sv_parallel_send_stats` (workers, encoders
+replayed), `sv_log_async_stats` (log writer: lines queued and dropped, time the main
+thread waited, write errors).
 
 ## Tick rate
 
@@ -51,7 +75,7 @@ frame for nothing.
 precisely (`clock_nanosleep` on Linux, high-resolution waitable timer on Windows 10 1803
 and later). Measured ([`benchmarks/mt101-scheduler.md`](benchmarks/mt101-scheduler.md)):
 
-| `sys_ticrate 1000` | Default | `sys_scheduler 1` |
+| `sys_ticrate 1000` | Stock loop (`sys_scheduler 0`) | `sys_scheduler 1` |
 |---|---|---|
 | Idle server FPS | 935.7 | 1000.0 |
 | Idle tick jitter | 14.4 µs | 4.6 µs |
@@ -104,7 +128,8 @@ come up to 1.5 intervals later (15 ms at 100 Hz), once per connection.
 ## Packet floods: the network thread
 
 Server browsers, monitoring sites and attackers send queries; on the stock engine, the
-game loop reads and answers each one itself. With `-netthread`, a dedicated thread reads
+game loop reads and answers each one itself. Here a dedicated thread (on by default,
+`-nonetthread` turns it off) reads
 the server socket and passes the game loop only what it would act on. Game code,
 Metamod, AMX Mod X and ReAPI hooks still all run on the main thread.
 
@@ -127,7 +152,7 @@ still sees the packets; `net_thread_stats` then says so.
 Measured on the full 32-player server under 50 000 packets/s from 4096 addresses
 ([`benchmarks/flood.md`](benchmarks/flood.md)):
 
-| A2S query flood | No flood | Flood, no thread | Flood, `-netthread` |
+| A2S query flood | No flood | Flood, no thread | Flood, network thread |
 |---|---|---|---|
 | Server FPS | 1000.0 | 1000.0 | 1000.0 |
 | Frame p99 | 263 µs | 552 µs | 224 µs |
@@ -155,12 +180,13 @@ raise `-netthread_queue` (64–16384, rounded to a power of two).
 
 ## Sending packets from a thread
 
-With `-netsend`, the game loop no longer hands each packet to the kernel itself: it
+With the send thread (on by default, `-nonetsend` turns it off), the game loop no longer
+hands each packet to the kernel itself: it
 copies it into a queue (split packets already split, so the wire format is unchanged),
 and a dedicated thread sends what is queued, in order, with one `sendmmsg` call on
 Linux. Measured with 32 players at 100 snapshots/s:
 
-| | Without | `-netsend` |
+| | Without | Send thread |
 |---|---|---|
 | Transmit phase, per frame | 21 µs | 3 µs |
 | Frame, average | 71 µs | 51 µs |
@@ -180,7 +206,8 @@ address), so a player's browser waits twice for the game loop and the 10 ms send
 ping it shows is about 12 ms too high. Each query costs the game loop 40 to 70 µs in Steam
 (the challenge, then the answer), plus about 20 µs per packet Steam sends.
 
-With `sv_a2s_cache 1` (and `-netthread`, `net_thread_filter 1`), the network thread answers
+With `sv_a2s_cache 1` (the default, with the network thread and `net_thread_filter 1`),
+the network thread answers
 these queries itself, as soon as they arrive:
 
 * the game loop asks Steam the queries clients ask, and gives the answers to the network
@@ -217,7 +244,7 @@ rate limits through ReAPI, the queries go to the game loop as before.
 
 ## Reading packets on arrival
 
-`sys_wake_on_packet 1` (with `sys_scheduler 1` and `-netthread`) wakes the main thread
+`sys_wake_on_packet 1` (with `sys_scheduler 1` and the network thread) wakes the main thread
 when packets arrive between two ticks and runs the client commands right away, instead
 of at the next tick. Physics and the snapshots stay on the tick.
 
@@ -266,25 +293,29 @@ data is sent only for the players whose name or score changed, and again for all
 them when the server reconnects to Steam. The Steam phase goes from 4.6 to 1.0 ms per
 second (60 s profile, 19 bots), the longest from 659 to 306 µs. Answers to queries
 handed to Steam leave on the next frame (0.4 ms measured) instead of within 10 ms;
-heartbeats leave up to 100 ms later, which the master server does not notice.
+heartbeats leave up to 100 ms later, which the master server does not notice
+([`stories/MT-306-steam-calls-on-demand.md`](stories/MT-306-steam-calls-on-demand.md)).
 
 ## Many players and entities: parallel snapshot encoding
 
 Each snapshot is built in two parts: the game DLL decides what each client sees
 (`AddToFullPack`, the gather), then the engine delta-encodes it (the encode).
-`-sys_threads 2 +sv_parallel_send 1` moves the encoding to two worker threads. The main
+By default (`-sys_threads 2`, `sv_parallel_send 1`) the encoding runs on two worker
+threads. The main
 thread still gathers every snapshot, in the same order as before, the workers and the
 main thread encode them, and the main thread then transmits the datagrams in client
 order. The packets are byte-identical to the serial ones.
 
-With Counter-Strike, the encoding starts once every snapshot of the frame is gathered.
-The game DLL registers conditional encoders (`Entity_Encode`, `Player_Encode`), which run
-during the encoding and call the engine back through the game DLL's engine function
-table. With Metamod, that table points to Metamod's callbacks, which are not
-thread-safe: running them on a worker while the main thread runs game DLL code corrupted
-the heap, and the server crashed at the next map change. The encoders now never run
-while the main thread runs game DLL or Metamod code, and run one at a time. A game DLL
-without conditional encoders keeps the encoding during the gather.
+With Counter-Strike, the game DLL registers conditional encoders (`Entity_Encode`,
+`Player_Encode`), which run during the encoding and call the engine back through the
+game DLL's engine function table. With Metamod, that table points to Metamod's
+callbacks, which are not thread-safe: running them on a worker while the main thread ran
+game DLL code corrupted the heap, and the server crashed at the next map change. The
+main thread now runs these encoders itself while it gathers each snapshot and records
+what they decide; the workers replay the record and never call game DLL or plugin code.
+A snapshot whose record does not match (full updates, at connection) is encoded by the
+main thread. The workers encode during the gather, with or without conditional
+encoders.
 
 Measured with 32 playing clients and 400 moving entities, Metamod and AMX Mod X loaded,
 averages of three runs ([`benchmarks/clients32-ents.md`](benchmarks/clients32-ents.md)):
@@ -301,7 +332,9 @@ encodes deltas. Earlier measurements with a load client that did not acknowledge
 properly showed a gain four times larger. The benchmark does not reproduce a real busy
 server (20 players or more, grenades and smokes everywhere, bursts of events): whether it
 pays off there is decided by the field validation (MT-702), with `sv_parallel_send` on and
-off under the same load.
+off under the same load. On the field server (19 bots, CSDM), with the encoders
+recorded during the gather, 94 % of the snapshots were encoded by the workers and none
+had to be re-encoded by the main thread.
 
 * Two workers are enough: with snapshot spreading, a frame has 2–3 snapshots. A third
   one only adds CPU. `-sys_threads auto` starts one per CPU but one, up to 8, which is
@@ -310,8 +343,8 @@ off under the same load.
   workers are already woken while the first snapshot of a frame is gathered, so it only
   costs CPU; leave it at 0.
 
-Plugins: the game DLL's own encoders (`Entity_Encode`, `Player_Encode`) run on the
-workers, one at a time, never while the main thread runs game DLL or plugin code. A plugin hooking the encode through ReAPI keeps its hook on the
+Plugins: the game DLL's own encoders (`Entity_Encode`, `Player_Encode`) run on the main
+thread during the gather; the workers replay their decisions. A plugin hooking the encode through ReAPI keeps its hook on the
 main thread: with `SV_EmitPings` hooked (scoreboard plugins), the snapshots carrying
 pings are encoded by the main thread; with `SV_CreatePacketEntities` or `SV_EmitEvents`
 hooked, all of them. `sv_parallel_send_stats` says which applies; the console also logs

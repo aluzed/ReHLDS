@@ -16,7 +16,8 @@ current frame, the hard constraints and what can be parallelised.
 3. **Byte-identical output.** For the same input, the server sends the same bytes with
    threading on or off (verified by MT-004).
 4. **Everything is switchable.** Each threaded feature has a cvar / command-line switch
-   and a serial fallback; default stays off until validated in production (MT-702).
+   and a serial fallback; default stays off until validated on the field server (MT-702),
+   then turns on (since 2026-10-13: see [`../performance-tuning.md`](../performance-tuning.md)).
 5. **Refactor, then thread.** Every parallelisation is preceded by a single-threaded
    refactor that isolates the work, merged and validated on its own.
 
@@ -42,6 +43,7 @@ current frame, the hard constraints and what can be parallelised.
 | [MT-303](MT-303-early-packet-filtering.md) | Early packet filtering on the network thread | E3 Async I/O | P1 | M | MT-302 |
 | [MT-304](MT-304-network-send-thread.md) | Network send offload | E3 Async I/O | P2 | M | MT-302 |
 | [MT-305](MT-305-a2s-query-cache.md) | A2S query answers from a cached snapshot | E3 Async I/O | P2 | M | MT-303 |
+| [MT-306](MT-306-steam-calls-on-demand.md) | Steam calls on demand | E3 Async I/O | P2 | S | MT-002 |
 | [MT-401](MT-401-split-send-client-messages.md) | Split `SV_SendClientMessages` into gather / encode / commit | E4 Parallel snapshots | P0 | L | MT-004 |
 | [MT-402](MT-402-thread-safe-delta-encoding.md) | Thread-safe delta encoding | E4 Parallel snapshots | P0 | L | MT-203, MT-401 |
 | [MT-403](MT-403-parallel-encode-and-transmit.md) | Parallel per-client encode and transmit | E4 Parallel snapshots | P0 | L | MT-402 |
@@ -60,7 +62,7 @@ Phase 1  (measure)        MT-001 → MT-002 → MT-003, MT-004, MT-201
 Phase 2  (cheap wins)     MT-101 → MT-102, MT-103, MT-104          ← re-benchmark
 Phase 3  (infrastructure) MT-202 → MT-203, MT-301
 Phase 4  (big win)        MT-401 → MT-402 → MT-403 → MT-404       ← re-benchmark
-Phase 5  (network)        MT-302 → MT-303 → MT-304, MT-305, MT-105
+Phase 5  (network)        MT-302 → MT-303 → MT-304, MT-305, MT-306, MT-105
 Phase 6  (optional)       MT-501, MT-601
 Phase 7  (rollout)        MT-701 → MT-702
 ```

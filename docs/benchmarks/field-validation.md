@@ -14,11 +14,15 @@ connections, map changes, rare timing.
   `mp_round_infinite 1`), with the classic CSDM spawn files (all maps of the cycle except
   `as_oilrig`). Constant fighting and respawns: more entities and events per frame than
   normal rounds. Installed by hand in `.bench/staging/`, not by `server.sh setup`.
-* Public Steam server (`sv_lan 0`, VAC), 20 slots, bots fill up to 10, `sys_ticrate 1000`,
-  `sv_maxupdaterate 102`, `sv_maxrate 100000`.
-* Features under validation: `-netthread`, `sys_scheduler 1`,
-  `sv_rehlds_snapshot_spread 1`. `FEATURES=0` starts the same build with all of them off,
-  for comparison sessions.
+* Public Steam server (`sv_lan 0`, VAC), 20 slots, `sys_ticrate 1000`,
+  `sv_maxupdaterate 102`, `sv_maxrate 100000`. Bots filled up to 10 at first; from
+  2026-10-13, 19 bots at all times (`bot_quota 19`, `bot_quota_mode normal`,
+  `bot_auto_vacate 0`, `bot_join_after_player 0`) and CSDM grenades on (HE, flash, smoke).
+* Features under validation: at first `-netthread`, `sys_scheduler 1`,
+  `sv_rehlds_snapshot_spread 1`; then `-sys_threads 2 +sv_parallel_send 1`, `-netsend`,
+  `sv_a2s_cache 1`, `sv_log_async 1`, `sv_steam_on_demand 1`. They are all on by default
+  since 2026-10-13 (see [`../performance-tuning.md`](../performance-tuning.md)). `FEATURES=0`
+  starts the same build with all of them off, for comparison sessions.
 * Host: Ryzen 9 3950X, Linux 7.0, behind NAT (UDP 27015 forwarded).
 
 ```sh
@@ -50,6 +54,8 @@ plugin error, no player complaint specific to the session.
 | 2026-10-12 | `6405e18` | on | 1 + bots | ≈ 20 min | 1000.0 | 56 µs (bots only, last minute) | 0 | First player: "ultra smooth". |
 | 2026-10-12 | `6405e18` | on | 1 + 10 bots, CSDM FFA | ≈ 35 min | – | – (no capture) | 0 | 227 kills; no timeout, all disconnects client-initiated. |
 | 2026-10-12 | `c937268` | on, `sv_parallel_send 1` | 1 + 18 bots, CSDM FFA | ≈ 7 min | 999.9 | 328 µs | 1 | Crash at the map change after the player left: heap corrupted by the encoding threads through Metamod, fixed (MT-404). |
+| 2026-10-13 | `ef9a314` | all: the above, encoders recorded during the gather (MT-404), `-netsend`, `sv_a2s_cache 1`, `sv_log_async 1` | 1 + 19 bots, CSDM FFA with grenades | ≈ 2 h of uptime | – | – | 0 | Player: "hyper stable, very pleasant". Counters below. |
+| 2026-10-13 | `452f477` | the same, `sv_steam_on_demand 1` | 19 bots | 60 s profiles | 1000 | – | 0 | Steam phase 4.6 → 1.0 ms per second, see below. |
 
 ## Findings
 
@@ -83,5 +89,26 @@ plugin error, no player complaint specific to the session.
   the bots (`physics` p99 292 µs, max 3.3 ms); the send to one player takes 3.1 µs on
   average (54 µs p99), 96 % of the snapshots encoded by the workers. The network thread
   dropped nothing.
-* Still missing for the go/no-go: a frame profile with several players, and the
-  comparison session with the features off.
+* **CSDM crash investigation** (2026-10-13): a crash the player met in CSDM could not be
+  reproduced: 2 h with five servers, map changes every 5 min and players joining and
+  leaving, then Memcheck runs with a Japanese player name and with a real client's
+  userinfo, all clean. The investigation stopped there, the server being stable in
+  play since.
+* **Combined build** (`ef9a314`, 2026-10-13): every feature on, one player with 19 bots
+  in CSDM with grenades. Counters at the end of the session: 70 859 snapshots encoded by
+  the workers and 4 851 by the main thread, none re-encoded after a replay mismatch (10
+  full updates not recorded); 75 962 packets sent by the send thread, no error, queue
+  never full; 6 browser queries answered by the network thread with their challenge;
+  1 916 log lines written asynchronously, none dropped, the main thread never waited.
+  With one player the send thread hands about one packet per `sendmmsg` call: batching
+  pays with several players.
+* **Steam calls** (2026-10-13, 19 bots, 60 s profiles): the Steam phase took 10 % of the
+  main thread's frame work, mostly `GetNextOutgoingPacket` every 10 ms (39 µs each,
+  nearly always for nothing) and the once a second player data update (120 to 660 µs).
+  With `sv_steam_on_demand 1`: 4.6 → 1.0 ms per second, longest 659 → 306 µs; queries
+  handed to Steam answered in 0.4 ms; the server stays registered with the master
+  server.
+* **Bots leaving**: with `bot_join_after_player 1` (the default), the bots left whenever
+  no human was on the server, so idle profiles had no load. Now 0.
+* Still missing for the go/no-go: a frame profile with several players, the comparison
+  session with the features off, and any run on Windows.
