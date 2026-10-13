@@ -725,30 +725,74 @@ NOINLINE int DELTAJit_Fields_Clear_Mark_Check(unsigned char *from, unsigned char
 	return func(from, to, marks, pForceMarkMask);
 }
 
-// Game DLL conditional encoders are serialised while worker threads encode
-// (sv_parallel_send): they then run on several threads, but never at the same time
-static std::atomic<bool> s_bSerialiseEncoders(false);
-static std::atomic_flag s_EncoderLock = ATOMIC_FLAG_INIT;
-
-void DELTAJit_SerialiseConditionalEncoders(bool serialise) {
-	s_bSerialiseEncoders.store(serialise, std::memory_order_relaxed);
-}
-
+// Game DLL conditional encoders run on the main thread only: the encoding threads
+// (sv_parallel_send) replay what the main thread recorded during the gather, see
+// encoder_record_t
 void DELTAJit_CallConditionalEncoder(delta_t *pFields, const unsigned char *from, const unsigned char *to) {
-	if (!s_bSerialiseEncoders.load(std::memory_order_relaxed)) {
-		pFields->conditionalencode(pFields, from, to);
+	engine_thread_state_t *state = ThreadState();
+
+	if (state->encoderReplay) {
+		const encoder_record_t *record = state->encoderReplay;
+		int index = state->encoderReplayCursor;
+		const encoder_call_t *call = &record->calls[index];
+
+		if (index >= record->numCalls || call->delta != pFields || call->from != from || call->to != to) {
+			state->encoderReplayMiss = true;
+			return;
+		}
+
+		for (int i = 0; i < call->numOps; i++) {
+			uint8 op = record->ops[call->firstOp + i];
+			if (op & ENCODER_OP_SET)
+				DELTAJit_SetFieldByIndex(pFields, op & ~ENCODER_OP_SET);
+			else
+				DELTAJit_UnsetFieldByIndex(pFields, op);
+		}
+
+		state->encoderReplayCursor++;
 		return;
 	}
 
-	while (s_EncoderLock.test_and_set(std::memory_order_acquire)) {
-		_mm_pause();
+	// Never game DLL code on an encoding thread: the snapshot goes back to the main thread
+	if (!state->isMainThread) {
+		state->encoderReplayMiss = true;
+		return;
 	}
-	RACE_HAPPENS_AFTER(&s_EncoderLock);
 
 	pFields->conditionalencode(pFields, from, to);
+}
 
-	RACE_HAPPENS_BEFORE(&s_EncoderLock);
-	s_EncoderLock.clear(std::memory_order_release);
+bool DELTAJit_RecordConditionalEncoder(encoder_record_t *record, delta_t *pFields, const unsigned char *from, const unsigned char *to) {
+	if (!pFields->conditionalencode)
+		return true;
+
+	if (record->numCalls >= MAX_RECORDED_ENCODER_CALLS)
+		return false;
+
+	encoder_call_t *call = &record->calls[record->numCalls++];
+	call->delta = pFields;
+	call->from = from;
+	call->to = to;
+	call->firstOp = (uint16)record->numOps;
+	call->numOps = 0;
+
+	engine_thread_state_t *state = ThreadState();
+	state->encoderRecord = record;
+	pFields->conditionalencode(pFields, from, to);
+	state->encoderRecord = NULL;
+
+	return record->numOps <= MAX_RECORDED_ENCODER_OPS;
+}
+
+// Main thread, while an encoder runs in DELTAJit_RecordConditionalEncoder
+static void DELTAJit_RecordOp(encoder_record_t *record, uint8 op) {
+	if (record->numOps < MAX_RECORDED_ENCODER_OPS) {
+		record->ops[record->numOps] = op;
+		record->calls[record->numCalls - 1].numOps++;
+	}
+
+	// Past the end: DELTAJit_RecordConditionalEncoder reports the record incomplete
+	record->numOps++;
 }
 
 NOINLINE int DELTAJit_TestDelta(unsigned char *from, unsigned char *to, delta_t *pFields)
@@ -768,12 +812,24 @@ void DELTAJit_SetSendFlagBits(delta_t *pFields, int *bits, int *bytecount) {
 
 void DELTAJit_SetFieldByIndex(delta_t *pFields, int fieldNumber)
 {
+	encoder_record_t *record = ThreadState()->encoderRecord;
+	if (record) {
+		DELTAJit_RecordOp(record, (uint8)(fieldNumber | ENCODER_OP_SET));
+		return;
+	}
+
 	delta_jit_marks_t* marks = DELTAJit_Marks(DELTAJit_LookupDeltaJit(__func__, pFields));
 	marks->markedFieldsMask.u32[fieldNumber >> 5] |= (1 << (fieldNumber & 31));
 }
 
 void DELTAJit_UnsetFieldByIndex(delta_t *pFields, int fieldNumber)
 {
+	encoder_record_t *record = ThreadState()->encoderRecord;
+	if (record) {
+		DELTAJit_RecordOp(record, (uint8)fieldNumber);
+		return;
+	}
+
 	delta_jit_marks_t* marks = DELTAJit_Marks(DELTAJit_LookupDeltaJit(__func__, pFields));
 	marks->markedFieldsMask.u32[fieldNumber >> 5] &= ~(1 << (fieldNumber & 31));
 }

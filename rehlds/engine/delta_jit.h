@@ -113,8 +113,9 @@ extern qboolean DELTAJit_IsFieldMarked(delta_t* pFields, int fieldNumber);
 
 // Called by the generated code instead of the conditional encoder itself
 extern void DELTAJit_CallConditionalEncoder(delta_t *pFields, const unsigned char *from, const unsigned char *to);
-// While worker threads encode, the conditional encoders (game DLL code) never run concurrently
-extern void DELTAJit_SerialiseConditionalEncoders(bool serialise);
+// Main thread: runs a conditional encoder and records the fields it sets and unsets
+// (encoder_record_t). Returns false when the record is full
+extern bool DELTAJit_RecordConditionalEncoder(struct encoder_record_s *record, delta_t *pFields, const unsigned char *from, const unsigned char *to);
 
 /* Returns original mask, before it was changed by the conditional encoder */
 extern uint64 DELTAJit_GetOriginalMask(delta_t* pFields);

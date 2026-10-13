@@ -3,6 +3,7 @@
 #include "cppunitlite/TestHarness.h"
 
 #include <atomic>
+#include <thread>
 
 // delta_tests.cpp
 void _InitDeltaField(delta_description_t* fieldDesc, int expectedOffset, int type, const char* name, int off, short sz, int bits, float preMult, float postMult);
@@ -92,10 +93,18 @@ namespace
 	byte s_Expected[NUM_PAIRS][MSG_SIZE];
 	int s_ExpectedSize[NUM_PAIRS];
 	std::atomic<int> s_Mismatches;
+	std::atomic<int> s_EncoderCallsOffMainThread;
+
+	// Encoder records of the work items, made by the main thread
+	const int NUM_ITEMS = 8;
+	encoder_record_t s_Records[NUM_ITEMS];
 
 	// Like the game DLLs' encoders: changes the marks through the engine
 	void TestConditionalEncoder(delta_s *pFields, const unsigned char *from, const unsigned char *to)
 	{
+		if (!IsMainThread())
+			s_EncoderCallsOffMainThread.fetch_add(1);
+
 		const encode_test_struct_t *t = (const encode_test_struct_t *)to;
 		if (t->b_0B & 1)
 			DELTA_UnsetFieldByIndex(pFields, 0);
@@ -118,15 +127,39 @@ namespace
 		return msg.cursize;
 	}
 
+	// The main thread records the encoders of an item's pairs, in encoding order
+	void RecordItem(int item)
+	{
+		encoder_record_t *record = &s_Records[item];
+		record->numCalls = 0;
+		record->numOps = 0;
+		record->complete = TRUE;
+		for (int pair = item; pair < NUM_PAIRS; pair += NUM_ITEMS)
+		{
+			if (!DELTAJit_RecordConditionalEncoder(record, s_pEncodeDelta, (byte *)&s_From[pair], (byte *)&s_To[pair]))
+				record->complete = FALSE;
+		}
+	}
+
 	void EncodeAndCompare(void *context, int item)
 	{
-		for (int pair = item; pair < NUM_PAIRS; pair += 8)
+		engine_thread_state_t *state = ThreadState();
+		state->encoderReplay = &s_Records[item];
+		state->encoderReplayCursor = 0;
+		state->encoderReplayMiss = false;
+
+		for (int pair = item; pair < NUM_PAIRS; pair += NUM_ITEMS)
 		{
 			byte buf[MSG_SIZE];
 			int size = EncodePair(pair, buf);
 			if (size != s_ExpectedSize[pair] || Q_memcmp(buf, s_Expected[pair], size))
 				s_Mismatches.fetch_add(1);
 		}
+
+		if (state->encoderReplayMiss || state->encoderReplayCursor != s_Records[item].numCalls)
+			s_Mismatches.fetch_add(1);
+
+		state->encoderReplay = nullptr;
 	}
 
 	void InitEncodeDelta(delta_description_t *fields)
@@ -153,8 +186,9 @@ namespace
 	}
 }
 
-// Several threads encoding with the same delta description and a conditional
-// encoder produce the bits of a serial encoding (MT-402)
+// Several threads encoding with the same delta description, replaying the conditional
+// encoder that the main thread recorded, produce the bits of a serial encoding
+// (MT-402, MT-404) and never call the encoder themselves
 TEST(ConcurrentDeltaEncoding, WorkerPool, 10000)
 {
 	EngineInitializer engInitGuard;
@@ -186,17 +220,78 @@ TEST(ConcurrentDeltaEncoding, WorkerPool, 10000)
 	CHECK("Cannot start the workers", pool.Start(NUM_WORKERS, InitTestWorker, "test"));
 
 	s_Mismatches = 0;
-	DELTAJit_SerialiseConditionalEncoders(true);
+	s_EncoderCallsOffMainThread = 0;
+	for (int item = 0; item < NUM_ITEMS; item++)
+	{
+		RecordItem(item);
+		CHECK("Record incomplete", s_Records[item].complete);
+	}
+
 	for (int round = 0; round < 500; round++)
 	{
 		pool.BeginBatch(EncodeAndCompare, nullptr);
-		pool.Publish(8);
+		pool.Publish(NUM_ITEMS);
 		pool.Finish();
 	}
-	DELTAJit_SerialiseConditionalEncoders(false);
 
 	pool.Stop();
 	LONGS_EQUAL("Concurrent encoding differs from the serial one", 0, s_Mismatches.load());
+	LONGS_EQUAL("Encoder called off the main thread", 0, s_EncoderCallsOffMainThread.load());
+}
+
+// A replay that does not match the record changes nothing and reports a miss; an
+// encoding thread without a record never calls the encoder
+TEST(EncoderReplayMiss, WorkerPool, 1000)
+{
+	EngineInitializer engInitGuard;
+
+	static delta_description_t fields[8];
+	InitEncodeDelta(fields);
+
+	for (int pair = 0; pair < 2; pair++)
+	{
+		Q_memset(&s_From[pair], 0, sizeof(s_From[pair]));
+		s_To[pair] = s_From[pair];
+		s_To[pair].b_0B = (uint8)pair;
+	}
+
+	encoder_record_t *record = &s_Records[0];
+	record->numCalls = 0;
+	record->numOps = 0;
+	CHECK("Recording failed", DELTAJit_RecordConditionalEncoder(record, s_pEncodeDelta, (byte *)&s_From[0], (byte *)&s_To[0]));
+	LONGS_EQUAL("One call recorded", 1, record->numCalls);
+	LONGS_EQUAL("One op recorded", 1, record->numOps);
+	LONGS_EQUAL("Wrong op recorded", ENCODER_OP_SET | 2, record->ops[0]);
+
+	// Replayed for another pair: miss, the cursor stays
+	engine_thread_state_t *state = ThreadState();
+	state->encoderReplay = record;
+	state->encoderReplayCursor = 0;
+	state->encoderReplayMiss = false;
+	byte buf[MSG_SIZE];
+	EncodePair(1, buf);
+	CHECK("Miss not reported", state->encoderReplayMiss);
+	LONGS_EQUAL("Cursor moved on a miss", 0, state->encoderReplayCursor);
+	state->encoderReplay = nullptr;
+	state->encoderReplayMiss = false;
+
+	// A worker thread without a record
+	s_EncoderCallsOffMainThread = 0;
+	bool missed = false;
+	std::thread worker([&missed]()
+	{
+		engine_thread_state_t workerState;
+		ThreadState_Init(&workerState, false);
+		ThreadState_SetCurrent(&workerState);
+
+		byte workerBuf[MSG_SIZE];
+		EncodePair(0, workerBuf);
+		missed = workerState.encoderReplayMiss;
+	});
+	worker.join();
+
+	CHECK("Miss not reported on a worker without a record", missed);
+	LONGS_EQUAL("Encoder called on a worker", 0, s_EncoderCallsOffMainThread.load());
 }
 
 #endif // REHLDS_JIT

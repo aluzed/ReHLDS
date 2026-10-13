@@ -81,3 +81,43 @@ Done for the guard:
   reports on threads the engine created, and `mapchange_check.sh` covers this path.
 * Not done: assertions in `callChain`, the "thread-safe hook" API extension, the
   compatibility matrix and the 1-hour run (field validation, MT-702).
+
+### Encoders recorded during the gather (branch `exp/mt404-encoders-in-gather`)
+
+Experiment, not merged. The main thread runs the conditional encoders while it gathers
+each snapshot (`SV_RecordEntityEncoders`, `sv_main.cpp`), with the same (from, to) pairs
+and in the same order as `SV_CreatePacketEntities_internal`, and records the fields they
+set and unset (`encoder_record_t`, `server.h`). The workers replay the record
+(`DELTAJit_CallConditionalEncoder`) and never call game DLL code: an encoding thread
+without a matching record changes nothing and hands the snapshot back to the main
+thread, which encodes it once the gather is done (the snapshot's copy of the event queue
+is restored first: emitting the events changes it). Encoders cannot read the marks, so
+the replayed marks are the same. The workers encode each snapshot as soon as it is
+gathered again, and the encoder lock is gone.
+
+* Full updates (`SV_FindBestBaseline`) are not recorded: one snapshot per connection.
+* Replay of a serial `replay` session with 2 and 3 workers: identical (24 005 packets),
+  0 replay misses. With every replay forced to miss (temporary build): identical.
+* `mapchange_check.sh`, 8 map changes with Metamod-R, AMX Mod X and bots: no crash.
+  Field server with CSDM: stable.
+* Unit tests: concurrent replay gives the serial bits and never calls the encoder off
+  the main thread; a replay that does not match changes nothing.
+
+`clients32-ents`, 3 runs each, `-netthread +sys_scheduler 1 +sv_rehlds_snapshot_spread 1`,
+2 workers:
+
+| | Serial | Parallel, encoders after the gather | Parallel, encoders recorded |
+|---|---|---|---|
+| Encode on the main thread avg / p99 | 23.8 / 150 µs | 20.9 / 100 µs | 19.2 / 90 µs |
+| `send_messages` avg / p99 | 49.8 / 287 µs | 47.5 / 230 µs | 47.3 / 229 µs |
+| Gather avg | 17.4 µs | 17.2 µs | 18.7 µs |
+| Process CPU | 24.0 % | 30.9 % | 29.4 % |
+| Frame avg | 206 µs | 201 µs | 203 µs |
+
+The overlap saves about 2 µs of encoding on average and 10 µs at p99, and the recording
+costs 1.5 µs of gather: on this benchmark the frame does not change. The encoding cost
+it targets is small since the load client was fixed (the "40 % to 13 %" above was
+measured with the broken client). What it brings is that game DLL and Metamod code
+never runs on an encoding thread. Heavier snapshots (a busy public server) are the
+field validation's to measure.
+
