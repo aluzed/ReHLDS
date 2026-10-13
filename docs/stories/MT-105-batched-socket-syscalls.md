@@ -34,3 +34,21 @@ CPU is available for simulation and more servers fit on one machine.
 ## Out of scope
 
 * io_uring (could be evaluated later if batching is not enough).
+
+## Status
+
+Sending is batched since MT-304 (`sendmmsg` on the send thread). Receiving with
+`recvmmsg` was tried on `exp/mt105-recvmmsg` (`-netbatch`, Linux), not merged: the
+network thread keeps up with the socket, so the batches stay small.
+
+Per-thread CPU over 30 s (`tools/bench/lib/run_server.sh` now records it in `cpu.txt`),
+in % of a core:
+
+| | Network thread, `recvfrom` | Network thread, `-netbatch` | Packets per `recvmmsg` |
+|---|---|---|---|
+| `flood-junk` (50 000 packets/s) | 22.6 % | 20.3 % | 1.7 |
+| `clients32` | 2.4 % | 2.3 % | 1.0 |
+
+The main thread is the same either way (5.5 %): since MT-302 the receive system calls
+are on the network thread, and the tick does not see them. The thread's cost per
+packet is mostly classifying it and waking up, not the call.

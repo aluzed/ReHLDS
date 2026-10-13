@@ -170,6 +170,12 @@ private:
 	bool WaitReadable(int timeoutMs);
 	// Returns the number of packets queued
 	int Drain(SOCKET sock);
+	// Filters, answers or queues one received packet. Returns whether it was queued
+	bool HandlePacket(SOCKET sock, const unsigned char *buffer, int size, struct sockaddr *from, int fromlen);
+#ifndef _WIN32
+	// -netbatch: Drain with recvmmsg, up to RECV_BATCH packets per system call
+	int DrainBatched(SOCKET sock);
+#endif
 	// Wakes the main thread when it waits in WaitForPacket
 	void WakeMainThread();
 	// Returns NTD_NONE to queue the packet, or the reason for dropping it. Sets
@@ -250,6 +256,11 @@ private:
 	// Set by the network thread when a query arrives, taken by the main thread
 	std::atomic<bool> m_QueryDemand[A2SQ_COUNT];
 	unsigned char m_Scratch[MAX_UDP_PACKET];
+#ifndef _WIN32
+	static const int RECV_BATCH = 64;
+	// -netbatch: RECV_BATCH receive buffers, nullptr without it
+	unsigned char (*m_Batch)[MAX_UDP_PACKET];
+#endif
 	uint64 m_BanReplyWindowStart;
 	int m_BanRepliesInWindow;
 
@@ -261,6 +272,7 @@ private:
 	std::atomic<uint32> m_ChallengesSent;
 	std::atomic<uint32> m_ChallengesLimited;	// also counted in the rate limited drops
 	std::atomic<uint32> m_RecvErrors;
+	std::atomic<uint32> m_RecvCalls;	// recvmmsg calls with -netbatch
 	std::atomic<uint32> m_MaxQueueDepth;
 };
 

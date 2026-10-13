@@ -3,6 +3,7 @@
 #ifndef _WIN32
 #include <poll.h>
 #include <sys/eventfd.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #endif
 
@@ -134,8 +135,12 @@ CNetReceiveThread::CNetReceiveThread() :
 	m_Received(0),
 	m_BanReplies(0),
 	m_RecvErrors(0),
+	m_RecvCalls(0),
 	m_MaxQueueDepth(0)
 {
+#ifndef _WIN32
+	m_Batch = nullptr;
+#endif
 	for (int i = 0; i < NTD_COUNT; i++)
 		m_Dropped[i].store(0, std::memory_order_relaxed);
 	for (int i = 0; i < A2SQ_COUNT; i++)
@@ -152,6 +157,7 @@ CNetReceiveThread::CNetReceiveThread() :
 	RACE_BENIGN(m_Dropped, sizeof(m_Dropped), "statistics");
 	RACE_BENIGN(&m_BanReplies, sizeof(m_BanReplies), "statistics");
 	RACE_BENIGN(&m_RecvErrors, sizeof(m_RecvErrors), "statistics");
+	RACE_BENIGN(&m_RecvCalls, sizeof(m_RecvCalls), "statistics");
 	RACE_BENIGN(&m_MaxQueueDepth, sizeof(m_MaxQueueDepth), "statistics");
 	RACE_BENIGN(m_Answered, sizeof(m_Answered), "statistics");
 	RACE_BENIGN(&m_ChallengesSent, sizeof(m_ChallengesSent), "statistics");
@@ -227,6 +233,12 @@ void CNetReceiveThread::Init()
 		else if (m_QueueSize > MAX_QUEUE_SIZE)
 			m_QueueSize = MAX_QUEUE_SIZE;
 	}
+
+#ifndef _WIN32
+	// Allocated once, kept until exit like the thread
+	if (COM_CheckParm("-netbatch"))
+		m_Batch = (unsigned char (*)[MAX_UDP_PACKET])Mem_Malloc(RECV_BATCH * MAX_UDP_PACKET);
+#endif
 
 	m_bEnabled = true;
 }
@@ -606,6 +618,11 @@ void CNetReceiveThread::RefreshConfig()
 
 int CNetReceiveThread::Drain(SOCKET sock)
 {
+#ifndef _WIN32
+	if (m_Batch)
+		return DrainBatched(sock);
+#endif
+
 	int queued = 0;
 	for (int count = 0; count < MAX_PACKETS_PER_DRAIN; count++)
 	{
@@ -640,58 +657,126 @@ int CNetReceiveThread::Drain(SOCKET sock)
 			continue;
 		}
 
-		Count(m_Received);
-
-		netadr_t adr;
-		Q_memset(&adr, 0, sizeof(adr));
-		SockadrToNetadr(&from, &adr);
-
-		uint64 now = Sys_MonotonicNs();
-		int queryType = A2SQ_NONE;
-		bool sendChallenge = false;
-		int dropReason = Classify(buffer, size, adr, now, queryType, sendChallenge);
-		if (dropReason != NTD_NONE)
-		{
-			Count(m_Dropped[dropReason]);
-
-			if (dropReason == NTD_BANNED)
-				SendBan(sock, &from, fromlen, now);
-
-			continue;
-		}
-
-		if (queryType != A2SQ_NONE)
-		{
-			if (sendChallenge)
-			{
-				SendChallenge(sock, &from, fromlen, adr, now);
-				Count(m_ChallengesSent);
-			}
-			else
-			{
-				SendQueryReply(sock, &from, fromlen, queryType);
-				Count(m_Answered[queryType]);
-			}
-			continue;
-		}
-
-		if (!slot)
-		{
-			Count(m_Dropped[NTD_QUEUE_FULL]);
-			continue;
-		}
-
-		slot->from = adr;
-		slot->size = size;
-		slot->arrivalNs = now;
-		m_Queue.CommitPush();
-		queued++;
-
-		uint32 depth = (uint32)m_Queue.Size();
-		if (depth > m_MaxQueueDepth.load(std::memory_order_relaxed))
-			m_MaxQueueDepth.store(depth, std::memory_order_relaxed);
+		if (HandlePacket(sock, buffer, size, &from, fromlen))
+			queued++;
 	}
 	return queued;
+}
+
+#ifndef _WIN32
+// The packets are received into the thread's own buffers, and those queued are copied
+// into the queue: a few hundred bytes for a game packet, against one system call per
+// packet. A batch smaller than RECV_BATCH means the socket is empty, which saves the
+// last call that only finds it so
+int CNetReceiveThread::DrainBatched(SOCKET sock)
+{
+	struct mmsghdr messages[RECV_BATCH];
+	struct iovec vectors[RECV_BATCH];
+	struct sockaddr addresses[RECV_BATCH];
+
+	int queued = 0;
+	for (int count = 0; count < MAX_PACKETS_PER_DRAIN; count += RECV_BATCH)
+	{
+		for (int i = 0; i < RECV_BATCH; i++)
+		{
+			vectors[i].iov_base = m_Batch[i];
+			vectors[i].iov_len = MAX_UDP_PACKET;
+			Q_memset(&messages[i].msg_hdr, 0, sizeof(messages[i].msg_hdr));
+			messages[i].msg_hdr.msg_name = &addresses[i];
+			messages[i].msg_hdr.msg_namelen = sizeof(addresses[i]);
+			messages[i].msg_hdr.msg_iov = &vectors[i];
+			messages[i].msg_hdr.msg_iovlen = 1;
+		}
+
+		int received = recvmmsg(sock, messages, RECV_BATCH, MSG_DONTWAIT, nullptr);
+		if (received < 0)
+		{
+			int err = LastSocketError();
+			if (IsWouldBlock(err))
+				return queued;
+
+			if (!IsIgnoredError(err))
+			{
+				Count(m_RecvErrors);
+				return queued;
+			}
+
+			continue;
+		}
+
+		Count(m_RecvCalls);
+		for (int i = 0; i < received; i++)
+		{
+			// Truncated to MAX_UDP_PACKET like recvfrom, Classify drops it
+			if (HandlePacket(sock, m_Batch[i], (int)messages[i].msg_len, &addresses[i], (int)messages[i].msg_hdr.msg_namelen))
+				queued++;
+		}
+
+		if (received < RECV_BATCH)
+			return queued;
+	}
+	return queued;
+}
+#endif
+
+bool CNetReceiveThread::HandlePacket(SOCKET sock, const unsigned char *buffer, int size, struct sockaddr *from, int fromlen)
+{
+	Count(m_Received);
+
+	netadr_t adr;
+	Q_memset(&adr, 0, sizeof(adr));
+	SockadrToNetadr(from, &adr);
+
+	uint64 now = Sys_MonotonicNs();
+	int queryType = A2SQ_NONE;
+	bool sendChallenge = false;
+	int dropReason = Classify(buffer, size, adr, now, queryType, sendChallenge);
+	if (dropReason != NTD_NONE)
+	{
+		Count(m_Dropped[dropReason]);
+
+		if (dropReason == NTD_BANNED)
+			SendBan(sock, from, fromlen, now);
+
+		return false;
+	}
+
+	if (queryType != A2SQ_NONE)
+	{
+		if (sendChallenge)
+		{
+			SendChallenge(sock, from, fromlen, adr, now);
+			Count(m_ChallengesSent);
+		}
+		else
+		{
+			SendQueryReply(sock, from, fromlen, queryType);
+			Count(m_Answered[queryType]);
+		}
+		return false;
+	}
+
+	// The slot the packet was received into, or the one it is copied into
+	Packet *slot = m_Queue.BeginPush();
+	if (!slot)
+	{
+		Count(m_Dropped[NTD_QUEUE_FULL]);
+		return false;
+	}
+
+	if (buffer != slot->data)
+		Q_memcpy(slot->data, buffer, size);
+
+	slot->from = adr;
+	slot->size = size;
+	slot->arrivalNs = now;
+	m_Queue.CommitPush();
+
+	uint32 depth = (uint32)m_Queue.Size();
+	if (depth > m_MaxQueueDepth.load(std::memory_order_relaxed))
+		m_MaxQueueDepth.store(depth, std::memory_order_relaxed);
+
+	return true;
 }
 
 int CNetReceiveThread::Classify(const unsigned char *data, int size, const netadr_t &from, uint64 now, int &queryType, bool &sendChallenge)
@@ -923,6 +1008,14 @@ void CNetReceiveThread::Cmd_Stats()
 		Con_Printf("  dropped: %-12s %u\n", s_DropReasonNames[i], m_Dropped[i].load(std::memory_order_relaxed));
 	Con_Printf("  ban replies   %u\n", m_BanReplies.load(std::memory_order_relaxed));
 	Con_Printf("  recv errors   %u\n", m_RecvErrors.load(std::memory_order_relaxed));
+#ifndef _WIN32
+	if (m_Batch)
+	{
+		uint32 calls = m_RecvCalls.load(std::memory_order_relaxed);
+		uint32 received = m_Received.load(std::memory_order_relaxed);
+		Con_Printf("  recvmmsg calls %u (%.1f packets per call)\n", calls, calls ? (double)received / calls : 0.0);
+	}
+#endif
 	Con_Printf("  A2S answered  info %u, players %u, rules %u, challenges %u (%u rate limited)\n",
 		m_Answered[A2SQ_INFO].load(std::memory_order_relaxed),
 		m_Answered[A2SQ_PLAYER].load(std::memory_order_relaxed),
