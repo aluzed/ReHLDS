@@ -6,6 +6,37 @@ Along with reverse engineering, a lot of defects and (potential) bugs were found
 
 ---
 
+## Unreleased (`feature/multithreading` fork)
+
+Frame timing and network work. The settings validated on the field server are on by default (scheduler, snapshot spreading,
+network and send threads, two encoding workers, A2S cache, asynchronous logs, Steam calls on demand); see
+[`docs/performance-tuning.md`](docs/performance-tuning.md) for the defaults, how to return to the original behaviour, and [`docs/stories/`](docs/stories/README.md) for the design and measurements.
+
+### Added
+- `sys_scheduler`, `sys_scheduler_slice`, `sys_spin_us`: frames paced on a fixed grid of deadlines, exact `sys_ticrate` (MT-101).
+- `sv_rehlds_snapshot_spread`: client snapshots spread evenly over the frames, exact update rate (MT-106).
+- `-nonetthread` (formerly `-netthread`), `-netthread_queue`, `net_thread_filter`, `net_thread_stats`: network receive thread that drops banned, rate-limited, malformed and unknown-address packets before the game loop (MT-302, MT-303).
+- `sv_profile`, `sv_profile_csv`, `sv_profile_reset`, `sv_profile_enable`, `sv_profile_frames`: per-phase frame profiler (MT-002).
+- `-sys_threads`, `sv_parallel_send`, `sys_threads_spin_us`, `sv_parallel_send_stats`: client snapshots encoded on worker threads; byte-identical output, serial fallback for plugin hooks on the encode path. With game DLL conditional encoders (Counter-Strike), the encoding starts once every snapshot of the frame is gathered. (MT-401 to MT-404).
+- `-nonetsend` (formerly `-netsend`), `-netsend_queue`, `net_send_stats`: server packets sent from a dedicated thread, a tick's packets in one `sendmmsg` call on Linux; the transmit phase of the frame goes from about 21 µs to 3 µs with 32 players (MT-304).
+- `sv_a2s_cache`: with the network thread, server browser queries answered on that thread from a copy of Steam's answers, with its own challenges; answers in 0.1 ms instead of 12 ms, and players can still connect during a query flood. Challenges have their own budget (`sv_a2s_challenges_sec`), so the server stays visible during a flood from spoofed addresses. (MT-305).
+- `sv_log_async`, `sv_log_async_overflow`, `sv_log_async_stats`: server log file and `qconsole.log` written on a dedicated thread (MT-301).
+- `sv_steam_on_demand`: Steam's outgoing packets read after a packet was handed to Steam and every 100 ms, instead of every 10 ms, and player names and scores sent to Steam only when they change; the Steam phase of the frame goes from 4.6 to 1.0 ms per second with 19 bots (MT-306).
+- `sv_client_lookup_cache`: the client a game packet comes from found through a table indexed by address, each result checked against the slot, instead of comparing every slot's address; packet dispatch 624 -> 502 ns per packet with 32 clients (MT-104).
+- `sys_wake_on_packet`: with the network thread and the scheduler, packets read as they arrive between ticks; takes player movement out of the tick, does not lower the latency players see (MT-102).
+- `-netrecord`, `-netreplay`, `-netsends`: byte-exact session record and replay for regression checks (MT-004).
+- `tools/bench/`: Docker load tests (bots, protocol clients with input latency measurement, HLTV, floods), replay regression, Helgrind race checks and map change checks with Metamod; `tools/staging/`: field validation server (MT-003, MT-004, MT-702).
+
+### Changed
+- The field validated optimisations are on by default: `sys_scheduler`, `sv_rehlds_snapshot_spread`, `sv_parallel_send`, `sv_a2s_cache`, `sv_log_async`, `sv_steam_on_demand` and `sv_client_lookup_cache` default to 1, the network and send threads start unless `-nonetthread` / `-nonetsend`, and two encoding workers start unless `-sys_threads 0` (fewer on a machine with fewer than 3 CPUs). `-netthread` and `-netsend` are still accepted. The Windows testsuite runs with all of them off.
+
+### Fixed
+- `sv_parallel_send 1` with Metamod: the game DLL's conditional encoders ran Metamod's callbacks on the encoding threads while the main thread ran game DLL code, which corrupted the heap; the server crashed at the next map change. Never released (MT-404).
+- The IP rate limiter walked its whole address table on every connectionless packet once it tracked more than 512 addresses: a 50 000 queries/s flood took a full server down to 45 fps. It now trims once per second (MT-303).
+- `host_profile` counted each frame twice (MT-103).
+- `Sys_FloatTime` on Linux: thread-safe start time initialisation (MT-103).
+- `-sys_ticrate` was parsed from the command line on every frame (MT-103).
+
 ## [`3.14.0.857`](https://github.com/rehlds/rehlds/releases/tag/3.14.0.857) - 2025-03-27
 
 ### Added

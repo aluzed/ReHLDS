@@ -1,0 +1,164 @@
+# Benchmark harness
+
+Runs a real HLDS with a locally built engine under a scripted load and reports the
+per-phase frame profile recorded by `sv_profile` (MT-002). See
+[`docs/stories/MT-003-load-test-harness.md`](../../docs/stories/MT-003-load-test-harness.md).
+
+Requirements: Docker, Python 3, ~2 GB of disk. Everything (HLDS install, builds,
+results) goes to `.bench/` at the repository root, or to `$BENCH_DIR`.
+
+## Usage
+
+```sh
+tools/bench/setup.sh                       # once: Docker image, HLDS, ReGameDLL_CS, nav mesh
+tools/bench/build.sh baseline              # build the working tree, store it as "baseline"
+# ... change code ...
+tools/bench/build.sh mychange
+tools/bench/run.sh bots20-hltv8 baseline
+tools/bench/run.sh bots20-hltv8 mychange
+tools/bench/report.py .bench/results/<mychange run> --baseline .bench/results/<baseline run>
+```
+
+`run.sh` prints a Markdown report and keeps everything in
+`.bench/results/<date>-<scenario>-<engine>/`: `report.md`, `profile.csv` (one row per
+frame), `server.log`, `hltv-*.log`, `cpu.txt` (process and main thread), `meta.txt`, and
+`clients.json` / `flood.json` when the scenario has load clients or a flood.
+
+`cpu.txt` and the report also give the CPU of every server thread over the measurement
+(network, send, encoding workers, log writer, Steam), in % of one core.
+
+Set `BENCH_DOCKER_ARGS`, e.g. `--cpuset-cpus=6,7`, to pass extra options to `docker run`,
+and `BENCH_SERVER_ARGS`, e.g. `+sys_scheduler 1`, to append arguments to the server command line.
+
+The fork's optimisations are on by default. To measure the original engine behaviour, pass
+the arguments that turn them all off (`ORIGINAL_ENGINE_ARGS` in `lib/common.sh`):
+`BENCH_SERVER_ARGS="-nonetthread -nonetsend -sys_threads 0 +sys_scheduler 0 +sv_rehlds_snapshot_spread 0 +sv_parallel_send 0 +sv_a2s_cache 0 +sv_log_async 0 +sv_steam_on_demand 0 +sv_client_lookup_cache 0"`.
+Older examples below that turn a feature on are now the default.
+
+## Scenarios
+
+| Scenario | Load |
+|---|---|
+| `idle` | empty server, loop overhead and tick regularity |
+| `bots20` | 20 bots playing rounds (game DLL: AI, physics, movement) |
+| `bots20-hltv8` | 20 bots + 8 HLTV proxies receiving snapshots (send path) |
+| `clients8` | 8 protocol load clients, smoke test of `loadclient.py` |
+| `clients32` | full server: 32 protocol load clients at 100 commands/s and 100 snapshots/s |
+| `flood-a2s` | `clients32` + 50 000 A2S_INFO queries/s from 4096 addresses |
+| `replay` | short session for replay checks: 8 load clients, 2 HLTV proxies, no bots |
+| `flood-junk` | `clients32` + 50 000 junk packets/s from 4096 addresses, shaped like connected-client traffic |
+| `replay-hooks` | `replay` with a plugin hooking `SV_EmitPings` (ReAPI): checks the `sv_parallel_send` fallback. Not deterministic (AMX Mod X): run it, do not replay it |
+| `clients32-ents` | 32 load clients **playing** (alive, they see each other) + 400 moving entities around them: ≈ 150 packet entities per snapshot (epic 4) |
+
+A scenario is a small `.env` file in `scenarios/`: `MAP`, `TICRATE`, `MAXPLAYERS`, `BOTS`,
+`HLTV`, `HLTV_UPDATERATE`, `CLIENTS`, `CLIENT_CMDRATE`, `WARMUP`, `DURATION`, `EXTRA_ARGS`,
+`FLOOD_KIND`, `FLOOD_PPS`, `FLOOD_SOURCES`, `CLIENTS_ALIVE` (the load clients join a team
+and spawn; without it they stay dead spectators), `METAMOD` (loads Metamod-R and
+AMX Mod X with the plugins of `plugins/`, compiled by `setup.sh`), `ENTITIES` (moving
+entities spawned by `plugins/bench_entities.sma`, needs `METAMOD=1`), `SERVER_COMMANDS` and
+`FINAL_COMMANDS` (console commands sent after the map load and at the end).
+
+## Replay and race checks (MT-004)
+
+```sh
+tools/bench/regression.sh before after       # same packets as the reference build?
+BENCH_RECORD=1 tools/bench/run.sh replay x   # record a session (any scenario)
+tools/bench/replay.sh .bench/results/<run> y # replay it with build y, compare
+BENCH_HELGRIND=ON tools/bench/build.sh helgrind
+tools/bench/race_check.sh helgrind 90        # Helgrind on the server with the network thread
+tools/bench/mapchange_check.sh x 8           # 8 map changes with Metamod, bots, encoding threads
+```
+
+`race_check.sh` loads Metamod and AMX Mod X when `setup.sh` installed them, changes the
+map once, and counts a report as the engine's when an access is in engine code or on a
+thread the engine created. Valgrind runs one thread at a time, so the main thread
+encodes nearly every snapshot itself under it: `mapchange_check.sh` covers the encoding
+threads instead, natively, with `MALLOC_CHECK_=3`. It fails when the server crashes on a
+map change or on `quit`; the engine before the MT-404 fix crashed at the 2nd map change.
+
+Memcheck needs the debug symbols of the 32-bit loader, which the multilib glibc of the
+main image lacks: run it with the native i386 image of `docker/memcheck`.
+
+```sh
+docker build -t rehlds-bench:memcheck tools/bench/docker/memcheck
+BENCH_IMAGE=rehlds-bench:memcheck tools/bench/race_check.sh x 180 memcheck
+```
+
+The `replay` scenario has load clients and HLTV proxies but no bots: sessions with bots
+are not deterministic. `BENCH_NO_ASLR=1` (with `BENCH_DOCKER_ARGS="--security-opt
+seccomp=unconfined"`) runs the server without address randomisation. Details and results:
+[`docs/benchmarks/replay.md`](../../docs/benchmarks/replay.md).
+
+## Flood generator
+
+`flood.py` sends connectionless packets (`a2s` queries, `challenge` requests) or `junk`
+during the measurement window, from many source addresses (127.2.x.y: the whole
+127.0.0.0/8 range is local on Linux), so that per-address rate limits alone do not stop
+it. One process sends up to about 100 000 packets/s. Server replies are counted in
+`flood.json`.
+
+Compare the network thread with the synchronous path:
+
+```sh
+BENCH_SERVER_ARGS="+sys_scheduler 1 +sv_rehlds_snapshot_spread 1" tools/bench/run.sh flood-a2s mybuild
+BENCH_SERVER_ARGS="-netthread +sys_scheduler 1 +sv_rehlds_snapshot_spread 1" tools/bench/run.sh flood-a2s mybuild
+```
+
+## Slow log device
+
+`slowlog/slow_log_write.c` simulates a slow disk for the server's log files (MT-301):
+loaded with `LD_PRELOAD`, it makes every write to a file under `logs/` or to
+`qconsole.log` sleep `SLOW_LOG_WRITE_MS` milliseconds first (each time the stdio buffer
+is written out, 8 KB). Build it in the benchmark container, then compare:
+
+```sh
+. tools/bench/lib/common.sh
+in_container gcc -m32 -O2 -shared -fPIC -o $BENCH_DIR/slow_log_write.so \
+	$PWD/tools/bench/slowlog/slow_log_write.c -ldl
+export BENCH_DOCKER_ARGS="-e LD_PRELOAD=$BENCH_DIR/slow_log_write.so -e SLOW_LOG_WRITE_MS=20"
+BENCH_SERVER_ARGS="+log on +mp_logdetail 3 +sv_log_async 0" tools/bench/run.sh bots20 mybuild
+BENCH_SERVER_ARGS="+log on +mp_logdetail 3 +sv_log_async 1" tools/bench/run.sh bots20 mybuild
+```
+
+`SLOW_LOG_DEBUG=1` prints the files it wraps and each write. The 64-bit tools of the
+container print a harmless "wrong ELF class" warning.
+
+## Protocol load client
+
+`loadclient.py` (Python 3, no dependency) connects fake players to the server with the
+real GoldSrc protocol: challenge, `connect`, netchan with reliable acknowledgements,
+bzip2 fragment reassembly and split datagram reassembly (snapshots over 1400 bytes), sign-on (`new`, `sendres`, `spawn`, `sendents`), team join,
+then `clc_move` at `CLIENT_CMDRATE` with moving players and `clc_delta` acknowledgements.
+Server packets are only decoded during sign-on; in game the netchan header is enough, so
+one process drives 32 players. Reliable messages made only of prints (AMX Mod X prints
+to clients during the sign-on) are skipped.
+
+It records the interval between server packets of each client over the profiling window
+(`clients.json`), which the report shows as the client-perceived snapshot rate and jitter,
+and the input latency: for every command, the time until the first server packet that
+acknowledges it, i.e. the wait for the server's tick and for the client's next snapshot.
+
+The server runs with `sv_lan 1` (the Steam ticket is random), `mp_consistency 0` and
+`sv_rehlds_maxclients_from_single_ip` raised, all set by `run_server.sh` when `CLIENTS` > 0.
+
+## How it works
+
+* The Docker image is the CI toolchain (Debian 11, i386 multilib); it builds the engine
+  and runs the 32-bit server.
+* HLDS is the stock `steam_legacy` app 90 (cstrike) from steamcmd; `run.sh` only replaces
+  `engine_i486.so`.
+* Bots come from ReGameDLL_CS, built from source at a pinned commit and enabled with
+  `bot_enable 1` in `game_init.cfg`. The navigation mesh is generated once by `setup.sh`.
+* HLTV proxies (shipped with HLDS) are the network clients: each one receives snapshots
+  of every entity. `sv_proxies` is raised to the scenario's `HLTV` count.
+* The console is driven through a FIFO; process CPU time is sampled from `/proc` over the
+  profiling window.
+
+## Limitations
+
+* HLTV proxies receive snapshots but send almost nothing; use `CLIENTS` for incoming load.
+* Load clients do not decode snapshots, so they do not exercise client-side prediction
+  or detect corrupted entity data; byte-exact checks belong to MT-004.
+* Bots make runs non-deterministic: tick metrics are stable within 1–2 % between runs,
+  per-phase averages and p99 within 10–20 %. Compare several runs before concluding on
+  a phase-level change.

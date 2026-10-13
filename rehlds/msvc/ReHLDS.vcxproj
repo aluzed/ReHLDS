@@ -140,6 +140,16 @@
     </ClCompile>
     <ClCompile Include="..\rehlds\RehldsRuntimeConfig.cpp" />
     <ClCompile Include="..\rehlds\rehlds_security.cpp" />
+    <ClCompile Include="..\rehlds\frame_profiler.cpp" />
+    <ClCompile Include="..\rehlds\frame_scheduler.cpp" />
+    <ClCompile Include="..\rehlds\net_receive_thread.cpp" />
+    <ClCompile Include="..\rehlds\net_send_thread.cpp" />
+    <ClCompile Include="..\rehlds\a2s_cache.cpp" />
+    <ClCompile Include="..\rehlds\net_replay.cpp" />
+    <ClCompile Include="..\rehlds\parallel_send.cpp" />
+    <ClCompile Include="..\rehlds\async_log_writer.cpp" />
+    <ClCompile Include="..\rehlds\thread_state.cpp" />
+    <ClCompile Include="..\rehlds\threading\worker_pool.cpp" />
     <ClCompile Include="..\rehlds\structSizeCheck.cpp" />
     <ClCompile Include="..\testsuite\anonymizer.cpp" />
     <ClCompile Include="..\testsuite\funccalls.cpp" />
@@ -196,6 +206,36 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\unittests\struct_offsets_tests.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\unittests\spsc_ring_tests.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\unittests\a2s_cache_tests.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\unittests\worker_pool_tests.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\unittests\async_log_writer_tests.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\unittests\sys_tests.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
@@ -454,6 +494,18 @@
     <ClInclude Include="..\rehlds\rehlds_api_impl.h" />
     <ClInclude Include="..\rehlds\rehlds_interfaces_impl.h" />
     <ClInclude Include="..\rehlds\rehlds_security.h" />
+    <ClInclude Include="..\rehlds\frame_profiler.h" />
+    <ClInclude Include="..\rehlds\frame_scheduler.h" />
+    <ClInclude Include="..\rehlds\net_receive_thread.h" />
+    <ClInclude Include="..\rehlds\net_send_thread.h" />
+    <ClInclude Include="..\rehlds\a2s_cache.h" />
+    <ClInclude Include="..\rehlds\net_replay.h" />
+    <ClInclude Include="..\rehlds\threading\spsc_ring.h" />
+    <ClInclude Include="..\rehlds\parallel_send.h" />
+    <ClInclude Include="..\rehlds\async_log_writer.h" />
+    <ClInclude Include="..\rehlds\thread_state.h" />
+    <ClInclude Include="..\rehlds\threading\worker_pool.h" />
+    <ClInclude Include="..\rehlds\monotonic_clock.h" />
     <ClInclude Include="..\testsuite\anonymizer.h" />
     <ClInclude Include="..\testsuite\funccalls.h" />
     <ClInclude Include="..\testsuite\memory.h" />

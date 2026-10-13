@@ -448,6 +448,8 @@ void NORETURN Sys_Error(const char *error, ...)
 		gEntityInterface.pfnSys_Error(text);
 
 	Log_Printf("FATAL ERROR (shutting down): %s\n", text);
+	// The last lines of the log, this one included, before the server goes down
+	AsyncLog_Flush(2000);
 
 #ifdef REHLDS_FIXES
 	if (syserror_logfile.string[0] != '\0')
@@ -599,6 +601,13 @@ double EXT_FUNC Sys_FloatTime(void)
 
 double Sys_FloatTime(void)
 {
+#ifdef REHLDS_FIXES
+	// The start time is a function-local static, so its one-time initialization is
+	// thread-safe. The original code below races on bInitialized and only subtracts
+	// the seconds of the start time.
+	static const uint64 start_ns = Sys_MonotonicNs();
+	return (double)(Sys_MonotonicNs() - start_ns) * 0.000000001;
+#else
 	static struct timespec start_time;
 	static bool bInitialized = false;
 	struct timespec now;
@@ -610,6 +619,7 @@ double Sys_FloatTime(void)
 	}
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	return (now.tv_sec - start_time.tv_sec) + now.tv_nsec * 0.000000001;
+#endif // REHLDS_FIXES
 }
 
 #endif //_WIN32
@@ -1307,6 +1317,12 @@ void Con_DebugLog(const char *file, const char *fmt, ...)
 
 	data[sizeof(data) - 1] = 0;
 
+	if (sv_log_async.value != 0.0f)
+	{
+		AsyncLog_Append(file, data);
+		return;
+	}
+
 #ifdef _WIN32
 
 	int fd = _open(file, _O_WRONLY | _O_APPEND | _O_CREAT, _S_IREAD | _S_IWRITE);
@@ -1332,7 +1348,25 @@ void Con_Printf(const char *fmt, ...)
 	Q_vsnprintf(Dest, sizeof(Dest), fmt, va);
 	va_end(va);
 
+	// Hooks and output are main thread only: a worker's text is printed after its work
+	if (!IsMainThread())
+	{
+		ThreadState_DeferConsole(Dest);
+		return;
+	}
+
 	g_RehldsHookchains.m_Con_Printf.callChain(Con_Printf_internal, Dest);
+}
+
+// Con_DPrintf on a worker thread: printed by the main thread after the work
+static void Con_DPrintf_Deferred(const char *fmt, va_list argptr)
+{
+	if (developer.value == 0.0f)
+		return;
+
+	char Dest[4096];
+	Q_vsnprintf(Dest, sizeof(Dest), fmt, argptr);
+	ThreadState_DeferConsole(Dest);
 }
 
 void EXT_FUNC Con_Printf_internal(const char *Dest)
@@ -1397,6 +1431,12 @@ void EXT_FUNC Con_DPrintf(const char *fmt, ...)
 	char Dest[4096];
 	va_list argptr;
 	va_start(argptr, fmt);
+	if (!IsMainThread())
+	{
+		Con_DPrintf_Deferred(fmt, argptr);
+		va_end(argptr);
+		return;
+	}
 	Q_vsnprintf(Dest, sizeof(Dest), fmt, argptr);
 	va_end(argptr);
 
@@ -1422,6 +1462,12 @@ void EXT_FUNC Con_DPrintf(const char *fmt, ...)
 	va_list argptr;
 
 	va_start(argptr, fmt);
+	if (!IsMainThread())
+	{
+		Con_DPrintf_Deferred(fmt, argptr);
+		va_end(argptr);
+		return;
+	}
 	if (developer.value != 0.0f)
 	{
 #ifdef _WIN32

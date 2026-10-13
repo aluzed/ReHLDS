@@ -1,12 +1,44 @@
-# ReHLDS [![C/C++ CI](https://github.com/rehlds/ReHLDS/actions/workflows/build.yml/badge.svg)](https://github.com/rehlds/ReHLDS/actions/workflows/build.yml) [![GitHub release (by tag)](https://img.shields.io/github/downloads/rehlds/ReHLDS/latest/total)](https://github.com/rehlds/ReHLDS/releases/latest) ![GitHub all releases](https://img.shields.io/github/downloads/rehlds/ReHLDS/total) [![Percentage of issues still open](http://isitmaintained.com/badge/open/rehlds/ReHLDS.svg)](http://isitmaintained.com/project/rehlds/ReHLDS "Percentage of issues still open") [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://www.gnu.org/licenses/gpl-3.0)  [![CII Best Practices](https://bestpractices.dev/projects/10929/badge)](https://www.bestpractices.dev/en/projects/10929) <img align="right" src="https://user-images.githubusercontent.com/5860435/111066129-040e5e00-84f0-11eb-9e1f-7a7e8611da2b.png" alt="ReHLDS" />
-Reverse-engineered (and bugfixed) HLDS
+# ReHLDS multithreaded [![C/C++ CI](https://github.com/aluzed/ReHLDS/actions/workflows/build.yml/badge.svg?branch=feature%2Fmultithreading)](https://github.com/aluzed/ReHLDS/actions/workflows/build.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) <img align="right" src="https://user-images.githubusercontent.com/5860435/111066129-040e5e00-84f0-11eb-9e1f-7a7e8611da2b.png" alt="ReHLDS" />
+Reverse-engineered (and bugfixed) HLDS, with a multithreaded server loop
 
 ## What is this?
-ReHLDS is a result of reverse engineering of original HLDS (build 6152/6153) using DWARF debug info embedded into linux version of HLDS, engine_i486.so
+A fork of [ReHLDS](https://github.com/rehlds/ReHLDS) whose goal is a steadier, faster server
+tick: work that does not touch the game DLL (network input and output, query answers,
+snapshot encoding, log writing, Steam calls) moves off the main thread, and the frame is
+paced on an exact grid. Game DLL, Metamod, AMX Mod X and ReAPI code still runs on the main
+thread only, so mods and plugins keep working unchanged.
 
-Along with reverse engineering, a lot of defects and (potential) bugs were found and fixed
+ReHLDS itself is a result of reverse engineering of original HLDS (build 6152/6153) using
+DWARF debug info embedded into linux version of HLDS, engine_i486.so. Along with reverse
+engineering, a lot of defects and (potential) bugs were found and fixed.
 
-You can try playing on one of many servers that are using ReHLDS: [Game Tracker](http://www.gametracker.com/search/?search_by=server_variable&search_by2=sv_version)
+### What the fork adds
+All of it is on by default once validated on a public server with players, Metamod-R,
+AMX Mod X, ReAPI and CSDM; every part can be turned off (see
+[performance tuning](docs/performance-tuning.md)).
+
+| | Without | With |
+|---|---|---|
+| Server FPS at `sys_ticrate 1000` (idle) | 935.7 | 1000.0 |
+| Tick jitter (idle) | 14.4 µs | 4.6 µs |
+| Snapshots per client at `cl_updaterate 100` | 97.5 /s | 100.0 /s |
+| Main thread CPU during an A2S query flood | 16.4 % | 7.9 % (same as without a flood) |
+| Players connecting during a 50 000 queries/s spoofed flood | 0/5 | 5/5 |
+| Server browser answer | 12.1 ms | 0.09 ms |
+| Packet transmit phase, 32 players | 21 µs per frame | 3 µs per frame |
+
+* **Frame scheduler** (`sys_scheduler`): frames on a fixed grid of deadlines, exact `sys_ticrate`.
+* **Snapshot spreading** (`sv_rehlds_snapshot_spread`): each client's snapshots at a fixed phase, exact update rate.
+* **Network receive thread** (`-nonetthread` to disable): reads the socket and drops floods, banned addresses and junk before the game loop.
+* **Server browser answers on the network thread** (`sv_a2s_cache`), with their own rate limits and challenges.
+* **Network send thread** (`-nonetsend` to disable): packets handed to the kernel off the main thread, one `sendmmsg` per tick on Linux.
+* **Parallel snapshot encoding** (`-sys_threads`, `sv_parallel_send`): delta encoding on worker threads, byte-identical output; game DLL encoders run on the main thread and are replayed by the workers.
+* **Asynchronous log writer** (`sv_log_async`), **Steam calls on demand** (`sv_steam_on_demand`), **client lookup by address** (`sv_client_lookup_cache`).
+* **Tooling**: per-phase frame profiler (`sv_profile`), byte-exact session record and replay, Docker load tests, race and map change checks (`tools/bench/`), a field validation server (`tools/staging/`).
+
+Design notes and measurements for every change are in [`docs/stories/`](docs/stories/README.md);
+the field sessions are in [`docs/benchmarks/field-validation.md`](docs/benchmarks/field-validation.md).
+Windows builds have not been run on a server yet.
 
 > [!TIP]
 > ReHLDS linux-releases now is signed via `GPG`, pubkey is: `63547829004f07716f7be4856c32c4282e60fb67` and could be found at [https://keyserver.ubuntu.com/](https://keyserver.ubuntu.com/pks/lookup?search=63547829004f07716f7be4856c32c4282e60fb67+&fingerprint=on&op=index).
@@ -21,6 +53,7 @@ You can try playing on one of many servers that are using ReHLDS: [Game Tracker]
 <ul>
 <li>Provide more stable (than official) version of Half-Life dedicated server with extended API for mods and plugins</li>
 <li>Performance optimizations (use of SSE for vector math for example) is another goal for the future</li>
+<li>This fork: a steadier and faster tick by moving engine work that does not touch the game DLL off the main thread</li>
 </ul>
 
 ## 🛠 License
@@ -105,8 +138,38 @@ This means that plugins that do binary code analysis (Orpheu for example) probab
 <li>sv_rehlds_movecmdtime_max_warnings // Maximum allowed speedhack/slowmo warnings before the punishment is applied. -1 - disable detection. Default: -1
 <li>sv_rehlds_movecmdtime_punish // Time in minutes for which the player will be banned for speedhacking/slowing (-1 - Kick, 0 - Permanent, use a negative number for a kick). Default: -1
 <li>sv_reconnect_timeout // Hard deadline in seconds for a client to re-initiate its connection after a level change, independent of netchan activity. Closes a phantom-slot exploit where a cheat blocks the "reconnect" command and keeps the netchan warm so sv_timeout never fires. 0 - disabled. Default: 30
+<li>sys_scheduler &lt;1|0&gt; // Pace server frames on a fixed grid of deadlines, one every 1/sys_ticrate seconds, instead of the launcher's 1 ms sleep loop. Gives the exact sys_ticrate (e.g. 1000.0 instead of ~935 fps) with a much steadier tick. See [performance tuning](docs/performance-tuning.md). Default: 1
+<li>sys_scheduler_slice &lt;1-1000&gt; // With sys_scheduler 1, how long in milliseconds the engine keeps running frames before returning to the launcher (console input). Default: 100
+<li>sys_spin_us &lt;0-2000&gt; // With sys_scheduler 1, busy-wait this many microseconds before each tick instead of sleeping, for an even steadier tick. Burns CPU: only for a core dedicated to the server. Default: 0
+<li>sys_wake_on_packet &lt;1|0&gt; // With sys_scheduler 1 and the network thread, read the packets as they arrive between two ticks instead of at the next tick. Takes the client commands out of the tick (shorter frames) but does not lower the latency players see, which the snapshot interval sets. About 3 % of a core. Default: 0
+<li>sv_rehlds_snapshot_spread &lt;1|0&gt; // Spread the clients' snapshots evenly over the frames (each client gets a fixed phase in its update interval) instead of sending them all in the same frame, and keep the exact cl_updaterate. Default: 1
+<li>sv_profile_enable &lt;1|0&gt; // Record the per-phase timings of every frame continuously (last sv_profile_frames frames). sv_profile &lt;seconds&gt; records without it. Default: 0
+<li>sv_profile_frames &lt;1000-600000&gt; // Number of frames the profiler keeps. Takes effect after sv_profile_reset. Default: 60000
+<li>sv_parallel_send &lt;1|0&gt; // Encode the clients' snapshots on the worker threads started with -sys_threads. With game DLL conditional encoders (Counter-Strike), after the main thread gathered them all; otherwise while it gathers the next ones. Snapshots stay byte-identical. Falls back to the main thread for the snapshots a plugin hooks (ReAPI SV_EmitPings: snapshots with pings; SV_CreatePacketEntities, SV_EmitEvents: all). See [performance tuning](docs/performance-tuning.md). Default: 1
+<li>sys_threads_spin_us &lt;0-2000&gt; // How long the worker threads spin for the next frame's snapshots before sleeping. Default: 0
+<li>sv_log_async &lt;1|0&gt; // Write the server log file and qconsole.log (-condebug) on a dedicated thread, so that a slow disk never stalls a frame. Takes effect at the next log file (map change or "log on"). Default: 1
+<li>sv_log_async_overflow &lt;block|drop&gt; // With sv_log_async 1, when 4 MB of log lines are waiting to be written: wait for room (block) or drop the line and count it (drop). Default: block
+<li>sv_client_lookup_cache &lt;1|0&gt; // Find the client a game packet comes from through a table indexed by address, each result checked against the slot, instead of comparing the address of every slot. Default: 1
+<li>sv_steam_on_demand &lt;1|0&gt; // Read the packets Steam wants sent on the frame after a packet was handed to Steam and every 100 ms, instead of every 10 ms, and tell Steam about a player's name and score only when they change. Saves about 3.5 ms of main thread time per second. See [performance tuning](docs/performance-tuning.md). Default: 1
+<li>net_thread_filter &lt;1|0&gt; // With the network thread, drop on the network thread the packets the main thread would ignore: IP-banned addresses (sv_filterban), queries above the rate limits, malformed packets and game packets from addresses that are not connected. Default: 1
+<li>sv_a2s_cache &lt;1|0&gt; // With the network thread and net_thread_filter 1, answer the server browser queries (A2S_INFO, A2S_PLAYER, A2S_RULES) on the network thread, as soon as they arrive, with a copy of Steam's answers refreshed every second and when players, cvars or the map change. Queries get their own rate limits, so a query flood no longer keeps players from connecting, and the challenges have their own budget, so a flood from spoofed addresses no longer hides the server from browsers. Off while a plugin hooks PreprocessPacket or the connectionless rate limits. See [performance tuning](docs/performance-tuning.md). Default: 1
+<li>sv_a2s_challenges_sec &lt;number&gt; // With sv_a2s_cache 1, most challenges per second the network thread sends to server browsers, for all addresses together; each address is also limited by max_queries_sec. A query flood from spoofed addresses gets as many challenges back (9 bytes each), up to this cap; past it, real browsers compete with the flood. 0: no cap. Default: 0</li>
 </ul>
 </details>
+
+### Command-line parameters
+<ul>
+<li>-nonetthread // Do not start the network thread: by default the server socket is read on a dedicated thread, which filters floods and junk before they reach the game loop (see net_thread_filter). -netthread, which started it before it was on by default, is still accepted. Default: thread started
+<li>-sys_threads &lt;N|auto&gt; // Start N worker threads (at most 8; auto: one per CPU but one; 0: none, snapshots encoded on the main thread) for sv_parallel_send. Default: 2, fewer on a machine with fewer than 3 CPUs
+<li>-netthread_queue &lt;64-16384&gt; // Size in packets of the queue between the network thread and the main thread. Default: 1024
+<li>-nonetsend // Do not start the send thread: by default the server's packets are sent from a dedicated thread, the game loop queues them instead of waiting for the kernel (one sendmmsg call for a tick's packets on Linux). Statistics: net_send_stats. -netsend, which started it before it was on by default, is still accepted. Default: thread started
+<li>-netsend_queue &lt;64-16384&gt; // Size in packets of the queue between the main thread and the send thread. Default: 1024
+<li>-netrecord &lt;file&gt; // Record the inputs of the session (clock, packets, console) to replay it byte for byte. For developers, see [docs/benchmarks/replay.md](docs/benchmarks/replay.md)
+<li>-netreplay &lt;file&gt; // Replay a session recorded with -netrecord as fast as possible, without the network, then quit
+<li>-netsends &lt;file&gt; // With -netrecord or -netreplay, write every packet sent by the server to &lt;file&gt;
+</ul>
+
+See [docs/performance-tuning.md](docs/performance-tuning.md) for the recommended settings.
 
 ## Commands
 <ul>
@@ -115,6 +178,12 @@ This means that plugins that do binary code analysis (Orpheu for example) probab
 <li>rcon_adduser &lt;ipaddress/CIDR&gt; // Add a new IP address or CIDR range to RCON user list (This command adds a new IP address to the RCON user list. The specified IP or CIDR range is granted privileged access to server console. Without any Rcon users, access is allowed to anyone with a valid password)</li>
 <li>rcon_deluser &lt;ipaddress&gt; {removeAll} // Remove an IP address or CIDR range from RCON user list</li>
 <li>rcon_users // List all IP addresses and CIDR ranges in RCON user list</li>
+<li>sv_profile [seconds] // Record the per-phase frame timings for &lt;seconds&gt;, then print a report (tick rate, jitter, percentiles per phase). Without argument, print a report of the frames already recorded</li>
+<li>sv_profile_csv &lt;file&gt; // Write the recorded frames to &lt;file&gt; in the game directory, one row per frame (tools/bench/report.py reads it)</li>
+<li>sv_profile_reset // Clear the recorded frames and apply a new sv_profile_frames</li>
+<li>sv_parallel_send_stats // Print the number of worker threads and whether the snapshots are encoded in parallel, else why not</li>
+<li>sv_log_async_stats // Print the log writer thread's counters: lines queued, queue usage, dropped lines, time the main thread waited, write errors</li>
+<li>net_thread_stats // Print the network thread's counters: packets received, dropped per reason, ban replies, queue usage</li>
 </ul>
 
 ## Build instructions

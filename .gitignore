@@ -20,3 +20,7 @@
 **/msvc/ipch
 
 rehlds/version/appversion.h
+
+# Benchmark harness data (tools/bench)
+/.bench/
+__pycache__/

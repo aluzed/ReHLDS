@@ -69,7 +69,11 @@ void EXT_FUNC PF_makevectors_I(const float *rgflVector)
 
 float EXT_FUNC PF_Time(void)
 {
+#ifdef REHLDS_FIXES
+	return (float)g_NetReplay.ValueF(Sys_FloatTime());
+#else
 	return Sys_FloatTime();
+#endif
 }
 
 void EXT_FUNC PF_setorigin_I(edict_t *e, const float *org)
@@ -2478,7 +2482,11 @@ void EXT_FUNC PF_changelevel_I(const char *s1, const char *s2)
 
 void SeedRandomNumberGenerator(void)
 {
+#ifdef REHLDS_FIXES
+	idum = -(int)g_NetReplay.Value(CRehldsPlatformHolder::get()->time(NULL));
+#else
 	idum = -(int)CRehldsPlatformHolder::get()->time(NULL);
+#endif
 	if (idum > 1000)
 	{
 		idum = -idum;
@@ -2729,7 +2737,9 @@ void EXT_FUNC PF_SetPhysicsKeyValue(const edict_t *pClient, const char *key, con
 
 int EXT_FUNC PF_GetCurrentPlayer(void)
 {
-	int idx = host_client - g_psvs.clients;
+	// While a snapshot is encoded (possibly on a worker thread): its client
+	client_t *client = ThreadState()->encodingClient;
+	int idx = (client ? client : host_client) - g_psvs.clients;
 	if (idx < 0 || idx >= g_psvs.maxclients)
 		return -1;
 

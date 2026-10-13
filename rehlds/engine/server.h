@@ -260,6 +260,79 @@ typedef struct deltacallback_s
 	int offset;
 } deltacallback_t;
 
+// What SV_WriteClientdataToMessage takes from the game DLL and the client, before it
+// writes anything
+typedef struct snapshot_clientdata_s
+{
+	qboolean choke;
+	int fixangle;            // 1: svc_setangle with fixangles, 2: svc_addangle with fixangles[1]
+	vec3_t fixangles;
+	qboolean hasWeaponData;
+} snapshot_clientdata_t;
+
+// Game DLL conditional encoders recorded during the gather (MT-404). An encoder
+// (Entity_Encode, Player_Encode in Counter-Strike) is game DLL code that the delta
+// encoding calls for each entity: through Metamod, it must not run on an encoding
+// thread while the main thread runs game DLL code. The main thread runs them while it
+// gathers the snapshot, in the order the encoding will call them, and records which
+// fields they set and unset; the encoding threads replay that. Encoders cannot read
+// the marks, only change them: the replay gives the same marks.
+#define MAX_RECORDED_ENCODER_CALLS	MAX_PACKET_ENTITIES
+#define MAX_RECORDED_ENCODER_OPS	4096
+#define ENCODER_OP_SET			0x80	// else unset; low bits: field index
+
+typedef struct encoder_call_s
+{
+	const struct delta_s *delta;
+	const unsigned char *from;
+	const unsigned char *to;
+	uint16 firstOp;
+	uint16 numOps;
+} encoder_call_t;
+
+typedef struct encoder_record_s
+{
+	qboolean complete;       // FALSE: not recorded, the main thread encodes the snapshot
+	int numCalls;
+	int numOps;
+	encoder_call_t calls[MAX_RECORDED_ENCODER_CALLS];
+	uint8 ops[MAX_RECORDED_ENCODER_OPS];
+} encoder_record_t;
+
+// One client's snapshot for one frame (SV_SendClientMessages), in two phases:
+//  - gather: everything that calls the game DLL or changes server state, on the main
+//    thread, in client order;
+//  - encode: writes the datagram from the gathered data and from server state that
+//    does not change until the end of the send, then the datagram is transmitted.
+typedef struct client_snapshot_s
+{
+	client_t *client;
+	qboolean datagram;       // FALSE: the client is not in the game, empty packet
+
+	// Gathered
+	float time;              // svc_time
+	qboolean useLocalGameTime; // sv_rehlds_local_gametime
+	double localGameTime;
+	double localGameTimeBase;
+	snapshot_clientdata_t clientdata;
+	qboolean sendPings;
+	uint16 pings[MAX_CLIENTS];
+	uint8 packetLoss[MAX_CLIENTS];
+	qboolean hasEvents;
+	event_state_t events;    // the client's queued events (when hasEvents), the queue is emptied
+	qboolean unreliableOverflowed;
+	byte unreliable[MAX_DATAGRAM];
+	int unreliableSize;
+	encoder_record_t encoders;   // sv_parallel_send with game DLL conditional encoders
+
+	// Encoded
+	sizebuf_t msg;
+	byte buf[MAX_DATAGRAM];
+	qboolean unreliableDropped;
+	qboolean msgOverflowed;
+	qboolean encodeOnMainThread; // an encoding thread could not replay the encoders
+} client_snapshot_t;
+
 extern char *pr_strings;
 extern char *gNullString;
 extern qboolean scr_skipupdate;
@@ -372,6 +445,10 @@ extern cvar_t sv_rcon_condebug;
 extern cvar_t sv_rehlds_userinfo_transmitted_fields;
 extern cvar_t sv_rehlds_attachedentities_playeranimationspeed_fix;
 extern cvar_t sv_rehlds_local_gametime;
+extern cvar_t sv_rehlds_snapshot_spread;
+extern cvar_t sv_parallel_send;
+extern cvar_t sv_steam_on_demand;
+extern cvar_t sv_client_lookup_cache;
 extern cvar_t sv_rehlds_send_mapcycle;
 extern cvar_t sv_usercmd_custom_random_seed;
 extern cvar_t sv_rehlds_allow_large_sprays;
@@ -421,13 +498,15 @@ extern char localmodels[MAX_MODELS][5];
 
 extern ipfilter_t ipfilters[MAX_IPFILTERS];
 extern int numipfilters;
+extern int ipfilters_version;
 extern userfilter_t userfilters[MAX_USERFILTERS];
 extern int numuserfilters;
 
 extern challenge_t g_rg_sv_challenges[MAX_CHALLENGES];
 
 extern rcon_failure_t g_rgRconFailures[32];
-extern deltacallback_t g_svdeltacallback;
+// Per thread (snapshots are encoded on worker threads): engine_thread_state_t
+#define g_svdeltacallback (ThreadState()->deltaCallback)
 
 delta_t *SV_LookupDelta(char *name);
 NOXREF void SV_DownloadingModules(void);
@@ -552,7 +631,14 @@ void SV_GetNetInfo(client_t *client, int *ping, int *packet_loss);
 int SV_CheckVisibility(edict_t *entity, unsigned char *pset);
 void SV_EmitPings(client_t *client, sizebuf_t *msg);
 void SV_EmitPings_internal(client_t *client, sizebuf_t *msg);
-void SV_WriteEntitiesToClient(client_t *client, sizebuf_t *msg);
+void SV_GatherClientdata(client_t *client, snapshot_clientdata_t *data);
+void SV_EncodeClientdata(client_t *client, const snapshot_clientdata_t *data, sizebuf_t *msg);
+void SV_GatherEntities(client_snapshot_t *snapshot);
+void SV_EncodeEntities(const client_snapshot_t *snapshot, sizebuf_t *msg);
+void SV_GatherClientDatagram(client_snapshot_t *snapshot);
+void SV_EncodeClientDatagram(client_snapshot_t *snapshot);
+void SV_RecordEntityEncoders(client_snapshot_t *snapshot);
+void SV_TransmitClientDatagram(client_snapshot_t *snapshot);
 void SV_CleanupEnts(void);
 qboolean SV_SendClientDatagram(client_t *client);
 void SV_UpdateUserInfo(client_t *client);
@@ -616,6 +702,7 @@ void SV_CheckForRcon(void);
 qboolean SV_IsSimulating(void);
 void SV_CheckMapDifferences(void);
 void SV_Frame();
+bool SV_ReadPacketsBetweenFrames();
 void SV_Frame_Internal();
 void SV_Drop_f(void);
 void SV_RegisterDelta(char *name, char *loadfile);

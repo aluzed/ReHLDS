@@ -1210,9 +1210,24 @@ void NET_FreeMsg(net_messages_t *pmsg)
 	}
 }
 
+#ifdef REHLDS_FIXES
+static qboolean NET_RecordServerPacket(netsrc_t sock, qboolean received)
+{
+	if (sock == NS_SERVER && g_NetReplay.IsRecording())
+		g_NetReplay.RecordPacket(received != FALSE, &net_message, net_from);
+
+	return received;
+}
+#endif
+
 qboolean NET_GetPacket(netsrc_t sock)
 {
 	qboolean bret;
+
+#ifdef REHLDS_FIXES
+	if (sock == NS_SERVER && g_NetReplay.IsReplaying())
+		return g_NetReplay.ReplayPacket(&net_message, &net_from) ? TRUE : FALSE;
+#endif
 
 	NET_AdjustLag();
 	NET_ThreadLock();
@@ -1220,6 +1235,16 @@ qboolean NET_GetPacket(netsrc_t sock)
 	{
 		bret = NET_LagPacket(TRUE, sock, &in_from, &in_message);
 	}
+#ifdef REHLDS_FIXES
+	else if (sock == NS_SERVER && g_NetReceiveThread.IsRunning())
+	{
+		// Same as NET_QueuePacket, with the packet already received and checked by the thread
+		if (g_NetReceiveThread.Pop(&in_message, &in_from))
+			bret = NET_LagPacket(TRUE, sock, &in_from, &in_message);
+		else
+			bret = NET_LagPacket(FALSE, sock, NULL, NULL);
+	}
+#endif
 	else
 	{
 		if (!use_thread)
@@ -1240,7 +1265,11 @@ qboolean NET_GetPacket(netsrc_t sock)
 		net_message.cursize = in_message.cursize;
 		Q_memcpy(&net_from, &in_from, sizeof(netadr_t));
 		NET_ThreadUnlock();
+#ifdef REHLDS_FIXES
+		return NET_RecordServerPacket(sock, bret);
+#else
 		return bret;
+#endif
 	}
 
 	net_messages_t *pmsg = messages[sock];
@@ -1255,7 +1284,11 @@ qboolean NET_GetPacket(netsrc_t sock)
 		bret = TRUE;
 	}
 	NET_ThreadUnlock();
+#ifdef REHLDS_FIXES
+	return NET_RecordServerPacket(sock, bret);
+#else
 	return bret;
+#endif
 }
 
 void NET_AllocateQueues()
@@ -1299,6 +1332,18 @@ void NET_FlushQueues()
 		p = n;
 	}
 	normalqueue = NULL;
+}
+
+// One datagram, as it goes out on the wire
+static int NET_SendDatagram(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, const struct sockaddr *to, int tolen)
+{
+#ifdef REHLDS_FIXES
+	// -netsend: the send thread hands it to the kernel (net_send_thread.cpp)
+	if (sock == NS_SERVER && !flags && g_NetSendThread.Send(s, buf, len, to, tolen))
+		return len;
+#endif
+
+	return CRehldsPlatformHolder::get()->sendto(s, buf, len, flags, to, tolen);
 }
 
 int NET_SendLong(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, const struct sockaddr *to, int tolen)
@@ -1346,7 +1391,7 @@ int NET_SendLong(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, c
 					NET_AdrToString(adr));
 			}
 
-			int ret = CRehldsPlatformHolder::get()->sendto(s, packet, size + sizeof(SPLITPACKET), flags, to, tolen);
+			int ret = NET_SendDatagram(sock, s, packet, size + sizeof(SPLITPACKET), flags, to, tolen);
 			if (ret < 0)
 			{
 				return ret;
@@ -1364,7 +1409,7 @@ int NET_SendLong(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, c
 		return totalSent;
 	}
 
-	int nSend = CRehldsPlatformHolder::get()->sendto(s, buf, len, flags, to, tolen);
+	int nSend = NET_SendDatagram(sock, s, buf, len, flags, to, tolen);
 	return nSend;
 }
 
@@ -1376,6 +1421,17 @@ void EXT_FUNC NET_SendPacket_api(unsigned int length, void *data, const netadr_t
 
 void NET_SendPacket(netsrc_t sock, int length, void *data, const netadr_t& to)
 {
+#ifdef REHLDS_FIXES
+	if (sock == NS_SERVER && (g_NetReplay.IsRecording() || g_NetReplay.IsReplaying()))
+	{
+		g_NetReplay.RecordSend(length, data, to);
+
+		// Nobody listens to a replay
+		if (g_NetReplay.IsReplaying())
+			return;
+	}
+#endif
+
 	if (to.type == NA_LOOPBACK)
 	{
 		NET_SendLoopPacket(sock, length, data, to);
@@ -1416,6 +1472,12 @@ void NET_SendPacket(netsrc_t sock, int length, void *data, const netadr_t& to)
 
 	struct sockaddr addr;
 	NetadrToSockadr(&to, &addr);
+
+	if (sock == NS_SERVER)
+	{
+		g_FrameProfiler.AddCounter(FPC_PACKETS_OUT, 1);
+		g_FrameProfiler.AddCounter(FPC_BYTES_OUT, length);
+	}
 
 	int ret = NET_SendLong(sock, net_socket, (const char *)data, length, 0, &addr, sizeof(addr));
 	if (ret == -1)
@@ -1886,9 +1948,24 @@ void NET_Config(qboolean multiplayer)
 			bFirst = FALSE;
 			NET_GetLocalAddress();
 		}
+
+#ifdef REHLDS_FIXES
+#ifdef _WIN32
+		g_NetReceiveThread.Start(ip_sockets[NS_SERVER], ipx_sockets[NS_SERVER]);
+#else
+		g_NetReceiveThread.Start(ip_sockets[NS_SERVER], INV_SOCK);
+#endif
+		g_NetSendThread.Start(ip_sockets[NS_SERVER]);
+#endif
 	}
 	else
 	{
+#ifdef REHLDS_FIXES
+		// The threads must not use sockets that are being closed
+		g_NetReceiveThread.Stop();
+		g_NetSendThread.Stop();
+#endif
+
 		NET_ThreadLock();
 
 		for (int sock = 0; sock < NS_MAX; sock++)
@@ -1975,8 +2052,15 @@ void NET_Init()
 	Cvar_RegisterVariable(&net_scale);
 	Cvar_RegisterVariable(&net_graphpos);
 
+#ifdef REHLDS_FIXES
+	// The cross-platform receive thread (net_receive_thread.cpp), unless -nonetthread
+	NetReceiveThread_Init();
+	// The send thread (net_send_thread.cpp), unless -nonetsend
+	NetSendThread_Init();
+#else
 	if (COM_CheckParm("-netthread"))
 		use_thread = TRUE;
+#endif
 
 	if (COM_CheckParm("-netsleep"))
 		net_sleepforever = 0;

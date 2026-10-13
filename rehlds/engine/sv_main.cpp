@@ -83,6 +83,7 @@ char localmodels[MAX_MODELS][5];
 
 ipfilter_t ipfilters[MAX_IPFILTERS];
 int numipfilters;
+int ipfilters_version; // changed by addip and removeip, for the network thread's copy of the filters
 userfilter_t userfilters[MAX_USERFILTERS];
 int numuserfilters;
 
@@ -261,6 +262,10 @@ cvar_t sv_rcon_condebug = { "sv_rcon_condebug", "1", 0, 1.0f, nullptr };
 cvar_t sv_rehlds_userinfo_transmitted_fields = { "sv_rehlds_userinfo_transmitted_fields", "", 0, 0.0f, nullptr };
 cvar_t sv_rehlds_attachedentities_playeranimationspeed_fix = {"sv_rehlds_attachedentities_playeranimationspeed_fix", "0", 0, 0.0f, nullptr};
 cvar_t sv_rehlds_local_gametime = {"sv_rehlds_local_gametime", "0", 0, 0.0f, nullptr};
+cvar_t sv_rehlds_snapshot_spread = {"sv_rehlds_snapshot_spread", "1", 0, 0.0f, nullptr};
+cvar_t sv_parallel_send = {"sv_parallel_send", "1", 0, 0.0f, nullptr};
+cvar_t sv_steam_on_demand = {"sv_steam_on_demand", "1", 0, 0.0f, nullptr};
+cvar_t sv_client_lookup_cache = {"sv_client_lookup_cache", "1", 0, 0.0f, nullptr};
 cvar_t sv_rehlds_send_mapcycle = { "sv_rehlds_send_mapcycle", "0", 0, 0.0f, nullptr };
 cvar_t sv_rehlds_maxclients_from_single_ip = { "sv_rehlds_maxclients_from_single_ip", "5", 0, 5.0f, nullptr };
 cvar_t sv_use_entity_file = { "sv_use_entity_file", "0", 0, 0.0f, nullptr };
@@ -1269,41 +1274,105 @@ void EXT_FUNC SV_SendResources_internal(sizebuf_t *msg)
 	MSG_EndBitWriting(msg);
 }
 
-void SV_WriteClientdataToMessage(client_t *client, sizebuf_t *msg)
+// Gather phase of SV_WriteClientdataToMessage: game DLL calls and client state changes
+void SV_GatherClientdata(client_t *client, snapshot_clientdata_t *data)
 {
 	edict_t *ent = client->edict;
 	client_frame_t *frame = &client->frames[SV_UPDATE_MASK & client->netchan.outgoing_sequence];
-	int bits = (SV_UPDATE_MASK & host_client->delta_sequence);
 
 	frame->senttime = realtime;
 	frame->ping_time = -1.0f;
 
-	if (client->chokecount)
-	{
-		MSG_WriteByte(msg, svc_choke);
-		client->chokecount = 0;
-	}
+	data->choke = client->chokecount != 0;
+	client->chokecount = 0;
 
+	data->fixangle = ent->v.fixangle;
 	if (ent->v.fixangle)
 	{
 		if (ent->v.fixangle == 2)
 		{
-			MSG_WriteByte(msg, svc_addangle);
-			MSG_WriteHiresAngle(msg, ent->v.avelocity[1]);
+			data->fixangles[1] = ent->v.avelocity[1];
 			ent->v.avelocity[1] = 0;
 		}
 		else
 		{
-			MSG_WriteByte(msg, svc_setangle);
-			MSG_WriteHiresAngle(msg, ent->v.angles[0]);
-			MSG_WriteHiresAngle(msg, ent->v.angles[1]);
-			MSG_WriteHiresAngle(msg, ent->v.angles[2]);
+			VectorCopy(ent->v.angles, data->fixangles);
 		}
 		ent->v.fixangle = 0;
 	}
 
 	Q_memset(&frame->clientdata, 0, sizeof(frame->clientdata));
-	gEntityInterface.pfnUpdateClientData(ent, host_client->lw != 0, &frame->clientdata);
+	g_FrameProfiler.BeginPhase(FPP_SEND_GATHER);
+	gEntityInterface.pfnUpdateClientData(ent, client->lw != 0, &frame->clientdata);
+	g_FrameProfiler.EndPhase(FPP_SEND_GATHER);
+
+	data->hasWeaponData = FALSE;
+	if (client->proxy)
+		return;
+
+	if (client->lw)
+	{
+		g_FrameProfiler.BeginPhase(FPP_SEND_GATHER);
+		data->hasWeaponData = gEntityInterface.pfnGetWeaponData(client->edict, frame->weapondata);
+		g_FrameProfiler.EndPhase(FPP_SEND_GATHER);
+	}
+
+#ifdef REHLDS_FIXES
+	// So, HL and CS games send absolute gametime in these vars, DMC and Ricochet games don't send absolute gametime
+	// TODO: idk about other games
+	// FIXME: there is a loss of precision, because gamedll has already written float gametime in them
+	if (data->hasWeaponData && sv_rehlds_local_gametime.value != 0.0f)
+	{
+		float localGameTimeBase = (float)g_GameClients[client - g_psvs.clients]->GetLocalGameTimeBase();
+		auto convertGlobalGameTimeToLocal =
+			[localGameTimeBase](float &globalGameTime)
+		{
+			if (globalGameTime > 0.0f)
+				globalGameTime -= localGameTimeBase;
+		};
+
+		weapon_data_t *tdata = frame->weapondata;
+		for (int i = 0; i < 64; i++, tdata++)
+		{
+			if (g_eGameType == GT_CStrike || g_eGameType == GT_CZero)
+				convertGlobalGameTimeToLocal(std::ref(tdata->m_fAimedDamage));
+			if (g_eGameType == GT_HL1 || g_eGameType == GT_CStrike || g_eGameType == GT_CZero)
+			{
+				convertGlobalGameTimeToLocal(std::ref(tdata->fuser2));
+				convertGlobalGameTimeToLocal(std::ref(tdata->fuser3));
+			}
+		}
+	}
+#endif
+}
+
+// Encode phase of SV_WriteClientdataToMessage: writes the client data and weapon
+// deltas gathered by SV_GatherClientdata
+void SV_EncodeClientdata(client_t *client, const snapshot_clientdata_t *data, sizebuf_t *msg)
+{
+	client_frame_t *frame = &client->frames[SV_UPDATE_MASK & client->netchan.outgoing_sequence];
+	int bits = (SV_UPDATE_MASK & client->delta_sequence);
+
+	if (data->choke)
+	{
+		MSG_WriteByte(msg, svc_choke);
+	}
+
+	if (data->fixangle)
+	{
+		if (data->fixangle == 2)
+		{
+			MSG_WriteByte(msg, svc_addangle);
+			MSG_WriteHiresAngle(msg, data->fixangles[1]);
+		}
+		else
+		{
+			MSG_WriteByte(msg, svc_setangle);
+			MSG_WriteHiresAngle(msg, data->fixangles[0]);
+			MSG_WriteHiresAngle(msg, data->fixangles[1]);
+			MSG_WriteHiresAngle(msg, data->fixangles[2]);
+		}
+	}
 
 	MSG_WriteByte(msg, svc_clientdata);
 
@@ -1318,20 +1387,20 @@ void SV_WriteClientdataToMessage(client_t *client, sizebuf_t *msg)
 	clientdata_t *from = &baseline;
 	clientdata_t *to = &frame->clientdata;
 
-	if (host_client->delta_sequence == -1)
+	if (client->delta_sequence == -1)
 	{
 		MSG_WriteBits(0, 1);
 	}
 	else
 	{
 		MSG_WriteBits(1, 1);
-		MSG_WriteBits(host_client->delta_sequence, 8);
-		from = &host_client->frames[bits].clientdata;
+		MSG_WriteBits(client->delta_sequence, 8);
+		from = &client->frames[bits].clientdata;
 	}
 
 	DELTA_WriteDelta((byte *)from, (byte *)to, TRUE, (delta_t *)g_pclientdelta, NULL);
 
-	if (host_client->lw && gEntityInterface.pfnGetWeaponData(host_client->edict, frame->weapondata))
+	if (data->hasWeaponData)
 	{
 		weapon_data_t wbaseline;
 		Q_memset(&wbaseline, 0, sizeof(wbaseline));
@@ -1341,32 +1410,10 @@ void SV_WriteClientdataToMessage(client_t *client, sizebuf_t *msg)
 
 		for (int i = 0; i < 64; i++, tdata++)
 		{
-#ifdef REHLDS_FIXES
-			// So, HL and CS games send absolute gametime in these vars, DMC and Ricochet games don't send absolute gametime
-			// TODO: idk about other games
-			// FIXME: there is a loss of precision, because gamedll has already written float gametime in them
-			if (sv_rehlds_local_gametime.value != 0.0f)
-			{
-				auto convertGlobalGameTimeToLocal =
-					[](float &globalGameTime)
-				{
-					if (globalGameTime > 0.0f)
-						globalGameTime -= (float)g_GameClients[host_client - g_psvs.clients]->GetLocalGameTimeBase();
-				};
-				if (g_eGameType == GT_CStrike || g_eGameType == GT_CZero)
-					convertGlobalGameTimeToLocal(std::ref(tdata->m_fAimedDamage));
-				if (g_eGameType == GT_HL1 || g_eGameType == GT_CStrike || g_eGameType == GT_CZero)
-				{
-					convertGlobalGameTimeToLocal(std::ref(tdata->fuser2));
-					convertGlobalGameTimeToLocal(std::ref(tdata->fuser3));
-				}
-			}
-#endif
-
-			if (host_client->delta_sequence == -1)
+			if (client->delta_sequence == -1)
 				fdata = &wbaseline;
 			else
-				fdata = &host_client->frames[bits].weapondata[i];
+				fdata = &client->frames[bits].weapondata[i];
 
 			if (DELTA_CheckDelta((byte *)fdata, (byte *)tdata, g_pweapondelta))
 			{
@@ -1385,6 +1432,13 @@ void SV_WriteClientdataToMessage(client_t *client, sizebuf_t *msg)
 
 	MSG_WriteBits(0, 1);
 	MSG_EndBitWriting(msg);
+}
+
+void SV_WriteClientdataToMessage(client_t *client, sizebuf_t *msg)
+{
+	snapshot_clientdata_t data;
+	SV_GatherClientdata(client, &data);
+	SV_EncodeClientdata(client, &data, msg);
 }
 
 void SV_WriteSpawn(sizebuf_t *msg)
@@ -1870,7 +1924,7 @@ void SV_ChallengesInit()
 #ifdef REHLDS_FIXES
 	static_assert(sizeof(g_raw_challenge_buf) == 64u, "Invalid g_raw_challenge_buf size");
 	for (uint32_t& s : g_raw_challenge_buf.salt)
-		s = __rdtsc() * rand();
+		s = (uint32_t)g_NetReplay.Value((uint32_t)(__rdtsc() * rand()));
 #endif
 }
 
@@ -2549,6 +2603,11 @@ void EXT_FUNC SV_ConnectClient_internal(void)
 	// download/spawn, so downloading players are never affected.
 	g_GameClients[host_client - g_psvs.clients]->SetReconnectDeadline(0.0);
 #endif // REHLDS_FIXES
+
+#ifdef REHLDS_FIXES
+	// The client answers as soon as it is accepted: the network thread must know its address first
+	g_NetReceiveThread.ClientsChanged();
+#endif
 
 	bIsSecure = Steam_GSBSecure();
 	Netchan_OutOfBandPrint(NS_SERVER, adr, "%c %i \"%s\" %i %i", S2C_CONNECTION, host_client->userid, NET_AdrToString(host_client->netchan.remote_address), bIsSecure, build_number()
@@ -3921,10 +3980,90 @@ bool EXT_FUNC NET_GetPacketPreprocessor(uint8* data, unsigned int len, const net
 	return true;
 }
 
+#ifdef REHLDS_FIXES
+// sv_client_lookup_cache 1 (MT-104): the slot a game packet comes from, found through a
+// small table indexed by address instead of comparing the address of every slot. The
+// table is only a hint: the slot it gives is checked (connected, same address) before
+// it is used, and on a miss the slots are scanned as before and the table updated. A
+// stale entry (client gone, slot reused) can therefore never send a packet to the
+// wrong client. Unlike the scan, only the first slot with the address gets the packet;
+// two connected slots never share an address (a client reconnecting from its address
+// takes its slot back, SV_ConnectClient)
+namespace
+{
+	const int CLIENT_LOOKUP_SIZE = 256;	// power of two, several times MAX_CLIENTS
+
+	struct client_lookup_t
+	{
+		uint32 ip;
+		uint16 port;
+		int16 slot;		// -1: empty
+	};
+
+	client_lookup_t s_ClientLookup[CLIENT_LOOKUP_SIZE];
+	bool s_ClientLookupInit;
+
+	inline bool SV_IsClientConnectedForPackets(const client_t *cl)
+	{
+		return cl->connected || cl->active || cl->spawned;
+	}
+
+	inline client_lookup_t &SV_ClientLookupEntry(uint32 ip, uint16 port)
+	{
+		uint32 hash = (ip ^ ((uint32)port << 16 | port)) * 2654435761u;
+		return s_ClientLookup[(hash >> 24) & (CLIENT_LOOKUP_SIZE - 1)];
+	}
+}
+
+// The slot of the connected client with this address, -1 when there is none
+int SV_FindClientSlot(netadr_t &adr)
+{
+	if (!s_ClientLookupInit)
+	{
+		for (auto &entry : s_ClientLookup)
+			entry.slot = -1;
+		s_ClientLookupInit = true;
+	}
+
+	uint32 ip = *(const uint32 *)adr.ip;
+	client_lookup_t &entry = SV_ClientLookupEntry(ip, adr.port);
+	if (entry.slot >= 0 && entry.slot < g_psvs.maxclients && entry.ip == ip && entry.port == adr.port)
+	{
+		client_t *cl = &g_psvs.clients[entry.slot];
+		if (SV_IsClientConnectedForPackets(cl) && NET_CompareAdr(adr, cl->netchan.remote_address))
+			return entry.slot;
+	}
+
+	for (int i = 0; i < g_psvs.maxclients; i++)
+	{
+		client_t *cl = &g_psvs.clients[i];
+		if (!SV_IsClientConnectedForPackets(cl) || !NET_CompareAdr(adr, cl->netchan.remote_address))
+			continue;
+
+		entry.ip = ip;
+		entry.port = adr.port;
+		entry.slot = (int16)i;
+		return i;
+	}
+
+	return -1;
+}
+#endif // REHLDS_FIXES
+
 void SV_ReadPackets(void)
 {
+#ifdef REHLDS_FIXES
+	if (g_NetReceiveThread.IsRunning())
+		g_NetReceiveThread.BeginFrame();
+	if (g_NetSendThread.IsRunning())
+		g_NetSendThread.ReportErrors();
+#endif
+
 	while (NET_GetPacket(NS_SERVER))
 	{
+		g_FrameProfiler.AddCounter(FPC_PACKETS_IN, 1);
+		g_FrameProfiler.AddCounter(FPC_BYTES_IN, net_message.cursize);
+
 #ifndef REHLDS_FIXES
 		if (SV_FilterPacket())
 		{
@@ -3950,14 +4089,31 @@ void SV_ReadPackets(void)
 				}
 #endif
 
+				g_FrameProfiler.BeginPhase(FPP_CONNECTIONLESS);
 				Steam_HandleIncomingPacket(net_message.data, net_message.cursize, ntohl(*(u_long *)&net_from.ip[0]), htons(net_from.port));
 				SV_ConnectionlessPacket();
+				g_FrameProfiler.EndPhase(FPP_CONNECTIONLESS);
 			}
 
 			continue;
 		}
 
+#ifdef REHLDS_FIXES
+		int firstSlot = 0;
+		int endSlot = g_psvs.maxclients;
+		if (sv_client_lookup_cache.value != 0.0f)
+		{
+			firstSlot = SV_FindClientSlot(net_from);
+			if (firstSlot < 0)
+				continue;
+
+			endSlot = firstSlot + 1;
+		}
+
+		for (int i = firstSlot; i < endSlot; i++)
+#else
 		for (int i = 0 ; i < g_psvs.maxclients; i++)
+#endif
 		{
 			client_t *cl = &g_psvs.clients[i];
 			if (!cl->connected && !cl->active && !cl->spawned)
@@ -3970,23 +4126,35 @@ void SV_ReadPackets(void)
 				continue;
 			}
 
-			if (Netchan_Process(&cl->netchan))
+			g_FrameProfiler.BeginPhase(FPP_NETCHAN_PROCESS);
+			qboolean processed = Netchan_Process(&cl->netchan);
+			g_FrameProfiler.EndPhase(FPP_NETCHAN_PROCESS);
+
+			if (processed)
 			{
 				if (g_psvs.maxclients == 1 || !cl->active || !cl->spawned || !cl->fully_connected)
 				{
 					cl->send_message = TRUE;
 				}
 
+				g_FrameProfiler.BeginPhase(FPP_EXECUTE_CLIENT_MSG);
 				SV_ExecuteClientMessage(cl);
+				g_FrameProfiler.EndPhase(FPP_EXECUTE_CLIENT_MSG);
 				gGlobalVariables.frametime = host_frametime;
 			}
 
 			if (Netchan_IncomingReady(&cl->netchan))
 			{
-				if (Netchan_CopyNormalFragments(&cl->netchan))
+				g_FrameProfiler.BeginPhase(FPP_NETCHAN_PROCESS);
+				qboolean fragmentsReady = Netchan_CopyNormalFragments(&cl->netchan);
+				g_FrameProfiler.EndPhase(FPP_NETCHAN_PROCESS);
+
+				if (fragmentsReady)
 				{
 					MSG_BeginReading();
+					g_FrameProfiler.BeginPhase(FPP_EXECUTE_CLIENT_MSG);
 					SV_ExecuteClientMessage(cl);
+					g_FrameProfiler.EndPhase(FPP_EXECUTE_CLIENT_MSG);
 				}
 				if (Netchan_CopyFileFragments(&cl->netchan))
 				{
@@ -4180,6 +4348,17 @@ void SV_EmitEvents_internal(client_t *cl, packet_entities_t *pack, sizebuf_t *ms
 	Q_memset(&nullargs, 0, sizeof(event_args_t));
 
 	es = &cl->events;
+
+	// The snapshot being encoded took the queue at gather time: events queued since
+	// then go to the next snapshot
+	client_snapshot_t *snapshot = ThreadState()->encodingSnapshot;
+	if (snapshot && snapshot->client == cl)
+	{
+		if (!snapshot->hasEvents)
+			return;
+
+		es = &snapshot->events;
+	}
 
 	for (ev = 0; ev < MAX_EVENT_QUEUE; ev++)
 	{
@@ -4430,8 +4609,6 @@ int SV_PointLeafnum(vec_t *p)
 void TRACE_DELTA(char *fmt, ...)
 {
 }
-
-deltacallback_t g_svdeltacallback;
 
 void SV_SetCallback(int num, qboolean remove, qboolean custom, int *numbase, qboolean full, int offset)
 {
@@ -4767,6 +4944,85 @@ int SV_CreatePacketEntities_internal(sv_delta_t type, client_t *client, packet_e
 	return msg->cursize;
 }
 
+#ifdef REHLDS_JIT
+// Main thread, after the snapshot's entities are gathered (sv_parallel_send): runs the
+// game DLL's conditional encoders of its packet entities, with the same (from, to)
+// pairs and in the same order as SV_CreatePacketEntities_internal will, and records
+// what they mark for the encoding threads (encoder_record_t). Keep the two in step:
+// a pair the encoding asks for that was not recorded sends the snapshot back to the
+// main thread, which is correct but slower.
+void SV_RecordEntityEncoders(client_snapshot_t *snapshot)
+{
+	client_t *client = snapshot->client;
+	encoder_record_t *record = &snapshot->encoders;
+	record->complete = FALSE;
+	record->numCalls = 0;
+	record->numOps = 0;
+
+	// Full update: SV_FindBestBaseline picks the baselines, left to the main thread
+	if (client->delta_sequence == -1)
+		return;
+
+	packet_entities_t *to = &client->frames[SV_UPDATE_MASK & client->netchan.outgoing_sequence].entities;
+	packet_entities_t *from = &client->frames[SV_UPDATE_MASK & client->delta_sequence].entities;
+	int oldmax = from->num_entities;
+	int newindex = 0;
+	int oldindex = 0;
+	bool recorded = true;
+
+	// The encoders ask for the current player
+	engine_thread_state_t *threadState = ThreadState();
+	threadState->encodingClient = client;
+
+	while (recorded && (newindex < to->num_entities || oldindex < oldmax))
+	{
+		int newnum = (newindex >= to->num_entities) ? ENTITY_SENTINEL : to->entities[newindex].number;
+		int oldnum = (oldindex >= oldmax) ? ENTITY_SENTINEL : from->entities[oldindex].number;
+
+		if (newnum > oldnum)
+		{
+			// Removed entity, no delta
+			oldindex++;
+			continue;
+		}
+
+		entity_state_t *toState = &to->entities[newindex];
+		qboolean custom = (toState->entityType == ENTITY_BEAM) ? TRUE : FALSE;
+		delta_t *delta = custom ? g_pcustomentitydelta : (SV_IsPlayerIndex(newnum) ? g_pplayerdelta : g_pentitydelta);
+		entity_state_t *fromState;
+
+		if (newnum == oldnum)
+		{
+			fromState = &from->entities[oldindex];
+			oldindex++;
+		}
+		else
+		{
+			// New entity, from its baseline
+			fromState = &g_psv.baselines[newnum];
+			if (sv_instancedbaseline.value && g_psv.instance_baselines->number != 0 && newnum > sv_lastnum)
+			{
+				edict_t *ent = EDICT_NUM(newnum);
+				for (int i = 0; i < g_psv.instance_baselines->number; i++)
+				{
+					if (g_psv.instance_baselines->classname[i] == ent->v.classname)
+					{
+						fromState = &g_psv.instance_baselines->baseline[i];
+						break;
+					}
+				}
+			}
+		}
+
+		recorded = DELTAJit_RecordConditionalEncoder(record, delta, (const unsigned char *)fromState, (const unsigned char *)toState);
+		newindex++;
+	}
+
+	threadState->encodingClient = NULL;
+	record->complete = recorded ? TRUE : FALSE;
+}
+#endif // REHLDS_JIT
+
 void SV_EmitPacketEntities(client_t *client, packet_entities_t *to, sizebuf_t *msg)
 {
 	SV_CreatePacketEntities(client->delta_sequence == -1 ? sv_packet_nodelta : sv_packet_delta, client, to, msg);
@@ -4879,6 +5135,11 @@ void EXT_FUNC SV_EmitPings_internal(client_t *client, sizebuf_t *msg)
 	int ping;
 	int packet_loss;
 
+	// The snapshot being encoded has the pings computed by the gather phase
+	const client_snapshot_t *snapshot = ThreadState()->encodingSnapshot;
+	if (snapshot && (snapshot->client != client || !snapshot->sendPings))
+		snapshot = NULL;
+
 	MSG_WriteByte(msg, svc_pings);
 	MSG_StartBitWriting(msg);
 	for (int i = 0; i < g_psvs.maxclients; i++)
@@ -4887,7 +5148,15 @@ void EXT_FUNC SV_EmitPings_internal(client_t *client, sizebuf_t *msg)
 		if (!cl->active)
 			continue;
 
-		SV_GetNetInfo(cl, &ping, &packet_loss);
+		if (snapshot)
+		{
+			ping = snapshot->pings[i];
+			packet_loss = snapshot->packetLoss[i];
+		}
+		else
+		{
+			SV_GetNetInfo(cl, &ping, &packet_loss);
+		}
 		MSG_WriteBits(1, 1);
 		MSG_WriteBits(i, 5);
 		MSG_WriteBits(ping, 12);
@@ -4898,12 +5167,16 @@ void EXT_FUNC SV_EmitPings_internal(client_t *client, sizebuf_t *msg)
 	MSG_EndBitWriting(msg);
 }
 
-void SV_WriteEntitiesToClient(client_t *client, sizebuf_t *msg)
+// Gather phase of the packet entities: visibility and AddToFullPack in the game DLL,
+// and the pings when the client gets them
+void SV_GatherEntities(client_snapshot_t *snapshot)
 {
+	client_t *client = snapshot->client;
 	client_frame_t *frame = &client->frames[SV_UPDATE_MASK & client->netchan.outgoing_sequence];
 
 	unsigned char *pvs = NULL;
 	unsigned char *pas = NULL;
+	g_FrameProfiler.BeginPhase(FPP_SEND_GATHER);
 	gEntityInterface.pfnSetupVisibility((edict_t*)client->pViewEntity, client->edict, &pvs, &pas);
 	unsigned char *pSet = pvs;
 
@@ -4922,7 +5195,7 @@ void SV_WriteEntitiesToClient(client_t *client, sizebuf_t *msg)
 	full_packet_entities_t* curPack = &fullpack;
 #endif // REHLDS_OPT_PEDANTIC
 
-	qboolean sendping = SV_ShouldUpdatePing(client);
+	snapshot->sendPings = SV_ShouldUpdatePing(client);
 	int flags = client->lw != 0;
 
 	int e;
@@ -4932,7 +5205,7 @@ void SV_WriteEntitiesToClient(client_t *client, sizebuf_t *msg)
 		if ((!cl->active && !cl->spawned) || cl->proxy)
 			continue;
 
-		qboolean add = gEntityInterface.pfnAddToFullPack(&curPack->entities[curPack->num_entities], e, &g_psv.edicts[e], host_client->edict, flags, TRUE, pSet);
+		qboolean add = gEntityInterface.pfnAddToFullPack(&curPack->entities[curPack->num_entities], e, &g_psv.edicts[e], client->edict, flags, TRUE, pSet);
 		if (add)
 			++curPack->num_entities;
 	}
@@ -4951,16 +5224,19 @@ void SV_WriteEntitiesToClient(client_t *client, sizebuf_t *msg)
 		//Part of gamedll's code is moved here to decrease amount of calls to AddToFullPack()
 		//We don't even try to transmit entities without model as well as invisible entities
 		if (ent->v.modelindex && !(ent->v.effects & EF_NODRAW)) {
-			qboolean add = gEntityInterface.pfnAddToFullPack(&curPack->entities[curPack->num_entities], e, &g_psv.edicts[e], host_client->edict, flags, FALSE, pSet);
+			qboolean add = gEntityInterface.pfnAddToFullPack(&curPack->entities[curPack->num_entities], e, &g_psv.edicts[e], client->edict, flags, FALSE, pSet);
 			if (add)
 				++curPack->num_entities;
 		}
 #else
-		qboolean add = gEntityInterface.pfnAddToFullPack(&curPack->entities[curPack->num_entities], e, &g_psv.edicts[e], host_client->edict, flags, FALSE, pSet);
+		qboolean add = gEntityInterface.pfnAddToFullPack(&curPack->entities[curPack->num_entities], e, &g_psv.edicts[e], client->edict, flags, FALSE, pSet);
 		if (add)
 			++curPack->num_entities;
 #endif //REHLDS_OPT_PEDANTIC
 	}
+
+	g_FrameProfiler.EndPhase(FPP_SEND_GATHER);
+	g_FrameProfiler.AddCounter(FPC_ENTITIES_SENT, curPack->num_entities);
 
 #ifdef REHLDS_FIXES
 	int attachedEntCount[MAX_CLIENTS + 1] = {};
@@ -5025,9 +5301,60 @@ void SV_WriteEntitiesToClient(client_t *client, sizebuf_t *msg)
 		Q_memcpy(pack->entities, fullpack.entities, sizeof(entity_state_t) * pack->num_entities);
 #endif
 
+	// The pings as SV_EmitPings_internal would compute them now: SV_GetNetInfo
+	// refreshes them every 2 seconds
+	if (snapshot->sendPings)
+	{
+		for (int i = 0; i < g_psvs.maxclients; i++)
+		{
+			client_t *cl = &g_psvs.clients[i];
+			if (!cl->active)
+				continue;
+
+			int ping, packet_loss;
+			SV_GetNetInfo(cl, &ping, &packet_loss);
+			snapshot->pings[i] = ping;
+			snapshot->packetLoss[i] = packet_loss;
+		}
+	}
+
+	// The events queued until now are emitted by the encode phase, from this copy;
+	// the client's queue is left as SV_EmitEvents_internal leaves it
+	snapshot->hasEvents = FALSE;
+	for (int ev = 0; ev < MAX_EVENT_QUEUE; ev++)
+	{
+		if (client->events.ei[ev].index != 0)
+		{
+			snapshot->hasEvents = TRUE;
+			break;
+		}
+	}
+
+	if (snapshot->hasEvents)
+	{
+		Q_memcpy(&snapshot->events, &client->events, sizeof(snapshot->events));
+		for (int ev = 0; ev < MAX_EVENT_QUEUE; ev++)
+		{
+			event_info_t *info = &client->events.ei[ev];
+			if (info->index == 0)
+			{
+				info->packet_index = -1;
+				info->entity_index = -1;
+			}
+			info->index = 0;
+		}
+	}
+}
+
+// Encode phase of the packet entities, events and pings
+void SV_EncodeEntities(const client_snapshot_t *snapshot, sizebuf_t *msg)
+{
+	client_t *client = snapshot->client;
+	packet_entities_t *pack = &client->frames[SV_UPDATE_MASK & client->netchan.outgoing_sequence].entities;
+
 	SV_EmitPacketEntities(client, pack, msg);
 	SV_EmitEvents(client, pack, msg);
-	if (sendping)
+	if (snapshot->sendPings)
 		SV_EmitPings(client, msg);
 }
 
@@ -5040,68 +5367,139 @@ void SV_CleanupEnts(void)
 	}
 }
 
-qboolean SV_SendClientDatagram(client_t *client)
+// Gather phase of a client's datagram, see client_snapshot_t
+void SV_GatherClientDatagram(client_snapshot_t *snapshot)
 {
-	unsigned char buf[MAX_DATAGRAM];
-	sizebuf_t msg;
+	client_t *client = snapshot->client;
 
-	msg.buffername = "Client Datagram";
-	msg.data = buf;
-	msg.maxsize = sizeof(buf);
-	msg.cursize = 0;
-	msg.flags = SIZEBUF_ALLOW_OVERFLOW;
+	g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
 
-	MSG_WriteByte(&msg, svc_time);
+	snapshot->time = g_psv.time;
+	snapshot->useLocalGameTime = FALSE;
 #ifdef REHLDS_FIXES
 	if (sv_rehlds_local_gametime.value != 0.0f)
 	{
 		CGameClient* gameClient = g_GameClients[client - g_psvs.clients];
 
-		double localGameTime = gameClient->GetLocalGameTime();
-		double localGameTimeBase = gameClient->GetLocalGameTimeBase();
-		DELTA_SetTimeBaseOverride(localGameTime, localGameTimeBase);
-
-		MSG_WriteFloat(&msg, (float)localGameTime);
+		snapshot->useLocalGameTime = TRUE;
+		snapshot->localGameTime = gameClient->GetLocalGameTime();
+		snapshot->localGameTimeBase = gameClient->GetLocalGameTimeBase();
+		snapshot->time = (float)snapshot->localGameTime;
 	}
-	else
 #endif
-	{
-		MSG_WriteFloat(&msg, g_psv.time);
-	}
 
-	SV_WriteClientdataToMessage(client, &msg);
-	SV_WriteEntitiesToClient(client, &msg);
+	SV_GatherClientdata(client, &snapshot->clientdata);
+	SV_GatherEntities(snapshot);
 
-	if (client->datagram.flags & SIZEBUF_OVERFLOWED)
+	// Unreliable messages queued for the client since its last datagram
+	snapshot->unreliableOverflowed = (client->datagram.flags & SIZEBUF_OVERFLOWED) != 0;
+	snapshot->unreliableSize = 0;
+	if (snapshot->unreliableOverflowed)
 	{
 		Con_Printf("WARNING: datagram overflowed for %s\n", client->name);
 	}
 	else
 	{
-#ifdef REHLDS_FIXES
-		if (msg.cursize + client->datagram.cursize > msg.maxsize)
-			Con_DPrintf("Warning: Ignoring unreliable datagram for %s, would overflow on msg\n", client->name);
-		else
-			SZ_Write(&msg, client->datagram.data, client->datagram.cursize);
-#else
-		SZ_Write(&msg, client->datagram.data, client->datagram.cursize);
-#endif
+		snapshot->unreliableSize = client->datagram.cursize;
+		Q_memcpy(snapshot->unreliable, client->datagram.data, client->datagram.cursize);
 	}
 
 	SZ_Clear(&client->datagram);
 
-	if (msg.flags & SIZEBUF_OVERFLOWED)
+	g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
+}
+
+// Encode phase of a client's datagram, into snapshot->msg. Runs on worker threads
+// with sv_parallel_send: only reads the snapshot, the client's frames and server
+// state that does not change during the send.
+void SV_EncodeClientDatagram(client_snapshot_t *snapshot)
+{
+	client_t *client = snapshot->client;
+	sizebuf_t *msg = &snapshot->msg;
+	engine_thread_state_t *threadState = ThreadState();
+
+	// The game DLL's conditional encoders ask for the current player
+	threadState->encodingClient = client;
+	threadState->encodingSnapshot = snapshot;
+
+	msg->buffername = "Client Datagram";
+	msg->data = snapshot->buf;
+	msg->maxsize = sizeof(snapshot->buf);
+	msg->cursize = 0;
+	msg->flags = SIZEBUF_ALLOW_OVERFLOW;
+
+	MSG_WriteByte(msg, svc_time);
+#ifdef REHLDS_FIXES
+	if (snapshot->useLocalGameTime)
 	{
-		Con_Printf("WARNING: msg overflowed for %s\n", client->name);
-		SZ_Clear(&msg);
+		DELTA_SetTimeBaseOverride(snapshot->localGameTime, snapshot->localGameTimeBase);
+	}
+#endif
+	MSG_WriteFloat(msg, snapshot->time);
+
+	SV_EncodeClientdata(client, &snapshot->clientdata, msg);
+	SV_EncodeEntities(snapshot, msg);
+
+	snapshot->unreliableDropped = FALSE;
+	if (!snapshot->unreliableOverflowed)
+	{
+#ifdef REHLDS_FIXES
+		if (msg->cursize + snapshot->unreliableSize > msg->maxsize)
+			snapshot->unreliableDropped = TRUE;
+		else
+			SZ_Write(msg, snapshot->unreliable, snapshot->unreliableSize);
+#else
+		SZ_Write(msg, snapshot->unreliable, snapshot->unreliableSize);
+#endif
 	}
 
-	Netchan_Transmit(&client->netchan, msg.cursize, buf);
+	snapshot->msgOverflowed = (msg->flags & SIZEBUF_OVERFLOWED) != 0;
+	if (snapshot->msgOverflowed)
+	{
+		SZ_Clear(msg);
+	}
 
 #ifdef REHLDS_FIXES
 	DELTA_ClearTimeBaseOverride();
 #endif
 
+	threadState->encodingClient = NULL;
+	threadState->encodingSnapshot = NULL;
+}
+
+// Last phase, on the main thread: diagnostics and transmission
+void SV_TransmitClientDatagram(client_snapshot_t *snapshot)
+{
+	client_t *client = snapshot->client;
+
+	if (!snapshot->datagram)
+	{
+		Netchan_Transmit(&client->netchan, 0, NULL);
+		return;
+	}
+
+	if (snapshot->unreliableDropped)
+		Con_DPrintf("Warning: Ignoring unreliable datagram for %s, would overflow on msg\n", client->name);
+
+	if (snapshot->msgOverflowed)
+		Con_Printf("WARNING: msg overflowed for %s\n", client->name);
+
+	g_FrameProfiler.BeginPhase(FPP_SEND_TRANSMIT);
+	Netchan_Transmit(&client->netchan, snapshot->msg.cursize, snapshot->buf);
+	g_FrameProfiler.EndPhase(FPP_SEND_TRANSMIT);
+}
+
+qboolean SV_SendClientDatagram(client_t *client)
+{
+	static client_snapshot_t snapshot;
+
+	snapshot.client = client;
+	snapshot.datagram = TRUE;
+	SV_GatherClientDatagram(&snapshot);
+	g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
+	SV_EncodeClientDatagram(&snapshot);
+	g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
+	SV_TransmitClientDatagram(&snapshot);
 	return TRUE;
 }
 
@@ -5253,9 +5651,43 @@ void SV_SkipUpdates(void)
 	}
 }
 
+#ifdef REHLDS_FIXES
+// Time of the next snapshot for a client, on a fixed per-client phase within its
+// update interval. With the original "now + interval", every client becomes due in
+// the same frame after any long frame and they stay aligned forever, so all the
+// snapshots of the server are built in one frame out of N. A fixed phase spreads
+// them evenly over the frames and keeps the update rate exact.
+double SV_NextSpreadMessageTime(client_t *cl)
+{
+	double interval = cl->next_messageinterval;
+	double now = realtime + host_frametime;
+	if (interval <= 0.0)
+		return now;
+
+	double phase = interval * (cl - g_psvs.clients) / g_psvs.maxclients;
+
+	// First phase-aligned time at least half an interval ahead
+	return phase + interval * floor((now + 1.5 * interval - phase) / interval);
+}
+#endif // REHLDS_FIXES
+
+// Snapshots gathered this frame and not transmitted yet, in client order
+static client_snapshot_t g_ClientSnapshots[MAX_CLIENTS];
+
 void SV_SendClientMessages(void)
 {
 	SV_UpdateToReliableMessages();
+
+	// Gather the snapshots of all the clients first, then encode and transmit them
+	// (epic 4), instead of each client from start to end
+	bool gatherFirst = false;
+#ifdef REHLDS_FIXES
+	gatherFirst = sv_parallel_send.value != 0.0f;
+#endif
+	int numSnapshots = 0;
+	// The worker threads encode each snapshot as soon as it is gathered
+	bool parallel = false;
+	bool parallelChecked = false;
 
 	for (int i = 0; i < g_psvs.maxclients; i++)
 	{
@@ -5302,13 +5734,95 @@ void SV_SendClientMessages(void)
 			}
 
 			host_client->send_message = FALSE;
-			cl->next_messagetime = host_frametime + cl->next_messageinterval + realtime;
+#ifdef REHLDS_FIXES
+			if (sv_rehlds_snapshot_spread.value != 0.0f)
+				cl->next_messagetime = SV_NextSpreadMessageTime(cl);
+			else
+#endif // REHLDS_FIXES
+				cl->next_messagetime = host_frametime + cl->next_messageinterval + realtime;
 			if (cl->active && cl->spawned && cl->fully_connected)
-				SV_SendClientDatagram(cl);
+			{
+				g_FrameProfiler.AddCounter(FPC_CLIENTS_SENT, 1);
+				if (gatherFirst)
+				{
+					if (!parallelChecked)
+					{
+						parallel = ParallelSend_Begin(g_ClientSnapshots);
+						parallelChecked = true;
+					}
+
+					client_snapshot_t *snapshot = &g_ClientSnapshots[numSnapshots++];
+					snapshot->client = cl;
+					snapshot->datagram = TRUE;
+					snapshot->encoders.complete = FALSE;
+					snapshot->encodeOnMainThread = FALSE;
+					SV_GatherClientDatagram(snapshot);
+
+					if (parallel)
+					{
+#ifdef REHLDS_JIT
+						if (ParallelSend_RecordsEncoders())
+						{
+							// Game DLL code: counted in the gather
+							g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
+							g_FrameProfiler.BeginPhase(FPP_SEND_GATHER);
+							SV_RecordEntityEncoders(snapshot);
+							g_FrameProfiler.EndPhase(FPP_SEND_GATHER);
+							g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
+						}
+#endif
+						ParallelSend_Publish(numSnapshots);
+					}
+				}
+				else
+					SV_SendClientDatagram(cl);
+			}
+			else if (gatherFirst)
+			{
+				// Keep the packets in client order
+				client_snapshot_t *snapshot = &g_ClientSnapshots[numSnapshots++];
+				snapshot->client = cl;
+				snapshot->datagram = FALSE;
+			}
 			else
 				Netchan_Transmit(&cl->netchan, 0, NULL);
 		}
 	}
+
+	if (numSnapshots)
+	{
+		client_t *lastClient = host_client;
+
+		if (parallel)
+		{
+			// Snapshots published after the last datagram are empty packets
+			ParallelSend_Publish(numSnapshots);
+
+			g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
+			ParallelSend_Finish();
+			g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
+		}
+		else
+		{
+			for (int i = 0; i < numSnapshots; i++)
+			{
+				client_snapshot_t *snapshot = &g_ClientSnapshots[i];
+				if (snapshot->datagram)
+				{
+					host_client = snapshot->client;
+					g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
+					SV_EncodeClientDatagram(snapshot);
+					g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
+				}
+			}
+		}
+
+		for (int i = 0; i < numSnapshots; i++)
+			SV_TransmitClientDatagram(&g_ClientSnapshots[i]);
+
+		host_client = lastClient;
+	}
+
 	SV_CleanupEnts();
 }
 
@@ -7504,6 +8018,8 @@ void SV_ListId_f(void)
 
 void SV_AddIP_f(void)
 {
+	ipfilters_version++;
+
 	if (Cmd_Argc() != 3)
 	{
 #ifdef REHLDS_FIXES
@@ -7604,6 +8120,8 @@ void SV_AddIP_f(void)
 
 void SV_RemoveIP_f(void)
 {
+	ipfilters_version++;
+
 #ifdef REHLDS_FIXES
 	int argCount = Cmd_Argc();
 	if (argCount != 2 && argCount != 3)
@@ -8298,6 +8816,21 @@ void SV_CheckMapDifferences(void)
 	}
 }
 
+// sys_wake_on_packet (MT-102): reads the packets that arrive while the scheduler
+// waits for the next tick, so that the client commands run on arrival instead of at
+// the tick. Physics and the snapshots stay on the tick. Returns false when no server
+// is running.
+bool SV_ReadPacketsBetweenFrames()
+{
+	if (!g_psv.active)
+		return false;
+
+	uint64 start = Sys_MonotonicNs();
+	SV_ReadPackets();
+	g_FrameProfiler.AddCounter(FPC_EARLY_READ_US, (int)((Sys_MonotonicNs() - start) / 1000));
+	return true;
+}
+
 void SV_Frame()
 {
 	g_RehldsHookchains.m_SV_Frame.callChain(SV_Frame_Internal);
@@ -8311,18 +8844,34 @@ void EXT_FUNC SV_Frame_Internal()
 	gGlobalVariables.frametime = host_frametime;
 	g_psv.oldtime = g_psv.time;
 	SV_CheckCmdTimes();
+
+	g_FrameProfiler.BeginPhase(FPP_READ_PACKETS);
 	SV_ReadPackets();
+	g_FrameProfiler.EndPhase(FPP_READ_PACKETS);
+
 	if (SV_IsSimulating())
 	{
+		g_FrameProfiler.BeginPhase(FPP_PHYSICS);
 		SV_Physics();
+		g_FrameProfiler.EndPhase(FPP_PHYSICS);
 		g_psv.time += host_frametime;
 	}
 	SV_RequestMissingResourcesFromClients();
+
+	g_FrameProfiler.BeginPhase(FPP_CHECK_TIMEOUTS);
 	SV_CheckTimeouts();
+	g_FrameProfiler.EndPhase(FPP_CHECK_TIMEOUTS);
+
+	g_FrameProfiler.BeginPhase(FPP_SEND_MESSAGES);
 	SV_SendClientMessages();
+	g_FrameProfiler.EndPhase(FPP_SEND_MESSAGES);
+
 	SV_CheckMapDifferences();
 	SV_GatherStatistics();
+
+	g_FrameProfiler.BeginPhase(FPP_STEAM);
 	Steam_RunFrame();
+	g_FrameProfiler.EndPhase(FPP_STEAM);
 }
 
 void SV_Drop_f(void)
@@ -8555,6 +9104,10 @@ void SV_Init(void)
 	Cvar_RegisterVariable(&sv_rehlds_userinfo_transmitted_fields);
 	Cvar_RegisterVariable(&sv_rehlds_attachedentities_playeranimationspeed_fix);
 	Cvar_RegisterVariable(&sv_rehlds_local_gametime);
+	Cvar_RegisterFeatureVariable(&sv_rehlds_snapshot_spread);
+	Cvar_RegisterFeatureVariable(&sv_parallel_send);
+	Cvar_RegisterFeatureVariable(&sv_steam_on_demand);
+	Cvar_RegisterFeatureVariable(&sv_client_lookup_cache);
 	Cvar_RegisterVariable(&sv_rehlds_send_mapcycle);
 	Cvar_RegisterVariable(&sv_rehlds_maxclients_from_single_ip);
 

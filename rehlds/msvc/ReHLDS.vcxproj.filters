@@ -230,6 +230,21 @@
     <ClCompile Include="..\unittests\struct_offsets_tests.cpp">
       <Filter>unittests</Filter>
     </ClCompile>
+    <ClCompile Include="..\unittests\sys_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\unittests\spsc_ring_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\unittests\a2s_cache_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\unittests\worker_pool_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\unittests\async_log_writer_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
     <ClCompile Include="..\engine\com_custom.cpp">
       <Filter>engine\common</Filter>
     </ClCompile>
@@ -312,6 +327,34 @@
       <Filter>unittests</Filter>
     </ClCompile>
     <ClCompile Include="..\rehlds\rehlds_security.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\frame_profiler.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\frame_scheduler.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\net_receive_thread.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\net_send_thread.cpp">
+    <ClCompile Include="..\rehlds\a2s_cache.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\net_replay.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\parallel_send.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\async_log_writer.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\thread_state.cpp">
+      <Filter>rehlds</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rehlds\threading\worker_pool.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
     <ClCompile Include="..\engine\sse_mathfun.cpp">
@@ -1031,6 +1074,40 @@
       <Filter>unittests</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\rehlds_security.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\frame_profiler.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\frame_scheduler.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\net_receive_thread.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\net_send_thread.h">
+    <ClInclude Include="..\rehlds\a2s_cache.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\net_replay.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\threading\spsc_ring.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\parallel_send.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\async_log_writer.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\thread_state.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\threading\worker_pool.h">
+      <Filter>rehlds</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rehlds\monotonic_clock.h">
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\common\qlimits.h">

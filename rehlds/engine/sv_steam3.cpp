@@ -28,6 +28,100 @@
 
 #include "precompiled.h"
 
+#ifdef REHLDS_FIXES
+// sv_steam_on_demand 1: Steam only queues a packet for the game socket in answer to
+// one it was handed (HandleIncomingPacket) or on its own timers (master server
+// heartbeats), and each GetNextOutgoingPacket call costs 20 to 40 us of the main
+// thread even when the queue is empty. The queue is then read on the frame after a
+// packet was handed to Steam or callbacks ran, and every 100 ms otherwise, instead of
+// every 10 ms.
+static bool s_bSteamOutgoingPending;
+
+// sv_steam_on_demand 1: what BUpdateUserData last sent per client slot, so that the
+// once a second update only tells Steam about the players whose name or score changed
+// (each call costs tens of microseconds)
+struct SteamUserData
+{
+	bool valid;
+	int userid;
+	uint64 steamID;
+	float frags;
+	char name[32];
+};
+
+static SteamUserData s_SteamUserData[MAX_CLIENTS];
+
+static void Steam_ForgetUserData()
+{
+	Q_memset(s_SteamUserData, 0, sizeof(s_SteamUserData));
+}
+
+static bool Steam_UserDataChanged(int slot, client_t *cl)
+{
+	SteamUserData &sent = s_SteamUserData[slot];
+	uint64 steamID = cl->network_userid.m_SteamID;
+	float frags = cl->edict->v.frags;
+
+	if (sent.valid && sent.userid == cl->userid && sent.steamID == steamID
+		&& sent.frags == frags && !Q_strcmp(sent.name, cl->name))
+		return false;
+
+	sent.valid = true;
+	sent.userid = cl->userid;
+	sent.steamID = steamID;
+	sent.frags = frags;
+	Q_strlcpy(sent.name, cl->name);
+	return true;
+}
+
+// sv_steam_on_demand 1: what was last sent to Steam about the server, so that the once
+// a second update only calls the setters whose value changed (each call costs about
+// 20 us: the whole update took about 210 us every second on the field server).
+// Everything is sent again on map change and when the server (re)connects to Steam
+struct SteamServerDetails
+{
+	bool valid;
+	int maxPlayers;
+	int botCount;
+	int passwordProtected;
+	char serverName[256];
+	char mapName[64];
+	char gameDescription[64];
+};
+
+static SteamServerDetails s_SteamServerDetails;
+
+static void Steam_ForgetServerDetails()
+{
+	Q_memset(&s_SteamServerDetails, 0, sizeof(s_SteamServerDetails));
+}
+
+// Whether the value must be sent to Steam, and remembers it if so
+static bool Steam_DetailChanged(int &sent, int value)
+{
+	if (sv_steam_on_demand.value != 0.0f && s_SteamServerDetails.valid && sent == value)
+		return false;
+
+	sent = value;
+	return true;
+}
+
+template <size_t N>
+static bool Steam_DetailChanged(char (&sent)[N], const char *value)
+{
+	if (sv_steam_on_demand.value != 0.0f && s_SteamServerDetails.valid && !Q_strncmp(sent, value, N - 1))
+		return false;
+
+	Q_strlcpy(sent, value);
+	return true;
+}
+
+void Steam_OutgoingPacketsPending()
+{
+	s_bSteamOutgoingPending = true;
+}
+#endif
+
 void CSteam3Server::OnGSPolicyResponse(GSPolicyResponse_t *pPolicyResponse)
 {
 	if (CRehldsPlatformHolder::get()->SteamGameServer()->BSecure())
@@ -51,6 +145,11 @@ void CSteam3Server::OnLogonSuccess(SteamServersConnected_t *pLogonSuccess)
 	}
 
 	m_SteamIDGS = CRehldsPlatformHolder::get()->SteamGameServer()->GetSteamID();
+#ifdef REHLDS_FIXES
+	// Tell the (re)connected Steam servers about every player and the server again
+	Steam_ForgetUserData();
+	Steam_ForgetServerDetails();
+#endif
 	CSteam3Server::SendUpdatedServerDetails();
 }
 
@@ -243,6 +342,9 @@ CSteam3Server::CSteam3Server() :
 
 void CSteam3Server::Activate()
 {
+#ifdef REHLDS_FIXES
+	Steam_ForgetServerDetails();
+#endif
 	bool bLanOnly;
 	int argSteamPort;
 	EServerMode eSMode;
@@ -356,6 +458,9 @@ bool CSteam3Server::NotifyClientConnect(client_t *client, const void *pvSteam2Ke
 
 	bRet = CRehldsPlatformHolder::get()->SteamGameServer()->SendUserConnectAndAuthenticate(htonl(client->network_userid.clientip), pvSteam2Key, ucbSteam2Key, &steamIDClient);
 	client->network_userid.m_SteamID = steamIDClient.ConvertToUint64();
+#ifdef REHLDS_FIXES
+	A2SCache_Invalidate();
+#endif
 
 	return bRet;
 }
@@ -368,6 +473,9 @@ bool CSteam3Server::NotifyBotConnect(client_t *client)
 	client->network_userid.idtype = AUTH_IDTYPE_LOCAL;
 	CSteamID steamId = CRehldsPlatformHolder::get()->SteamGameServer()->CreateUnauthenticatedUserConnection();
 	client->network_userid.m_SteamID = steamId.ConvertToUint64();
+#ifdef REHLDS_FIXES
+	A2SCache_Invalidate();
+#endif
 	return true;
 }
 
@@ -379,11 +487,18 @@ void CSteam3Server::NotifyClientDisconnect(client_t *cl)
 	if (cl->network_userid.idtype == AUTH_IDTYPE_STEAM || cl->network_userid.idtype == AUTH_IDTYPE_LOCAL)
 	{
 		CRehldsPlatformHolder::get()->SteamGameServer()->SendUserDisconnect(cl->network_userid.m_SteamID);
+#ifdef REHLDS_FIXES
+		s_SteamUserData[cl - g_psvs.clients].valid = false;
+		A2SCache_Invalidate();
+#endif
 	}
 }
 
 void CSteam3Server::NotifyOfLevelChange(bool bForce)
 {
+#ifdef REHLDS_FIXES
+	Steam_ForgetServerDetails();
+#endif
 	SendUpdatedServerDetails();
 	bool iHasPW = (sv_password.string[0] && Q_stricmp(sv_password.string, "none"));
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetPasswordProtected(iHasPW);
@@ -408,6 +523,10 @@ void CSteam3Server::NotifyOfLevelChange(bool bForce)
 		}
 		CRehldsPlatformHolder::get()->SteamGameServer()->SetKeyValue(var->name, szVal);
 	}
+
+#ifdef REHLDS_FIXES
+	A2SCache_Invalidate();
+#endif
 }
 
 void CSteam3Server::RunFrame()
@@ -441,11 +560,17 @@ void CSteam3Server::RunFrame()
 		m_bHasActivePlayers = bHasPlayers;
 		SendUpdatedServerDetails();
 		bool iHasPW = (sv_password.string[0] && Q_stricmp(sv_password.string, "none"));
+#ifdef REHLDS_FIXES
+		if (Steam_DetailChanged(s_SteamServerDetails.passwordProtected, iHasPW ? 1 : 0))
+#endif
 		CRehldsPlatformHolder::get()->SteamGameServer()->SetPasswordProtected(iHasPW);
 
 #ifdef REHLDS_FIXES
 		// Let's get it an up-to-date description of the game
-		CRehldsPlatformHolder::get()->SteamGameServer()->SetGameDescription(gEntityInterface.pfnGetGameDescription());
+		const char *description = gEntityInterface.pfnGetGameDescription();
+		if (Steam_DetailChanged(s_SteamServerDetails.gameDescription, description ? description : ""))
+			CRehldsPlatformHolder::get()->SteamGameServer()->SetGameDescription(description);
+		s_SteamServerDetails.valid = true;
 #endif
 
 		for (int i = 0; i < g_psvs.maxclients; i++)
@@ -455,6 +580,9 @@ void CSteam3Server::RunFrame()
 				continue;
 
 #ifdef REHLDS_FIXES
+			if (sv_steam_on_demand.value != 0.0f && !Steam_UserDataChanged(i, cl))
+				continue;
+
 			ISteamGameServer_BUpdateUserData(cl->network_userid.m_SteamID, cl->name, cl->edict->v.frags);
 #else
 			CRehldsPlatformHolder::get()->SteamGameServer()->BUpdateUserData(cl->network_userid.m_SteamID, cl->name, cl->edict->v.frags);
@@ -476,15 +604,31 @@ void CSteam3Server::RunFrame()
 		}
 	}
 
+#ifdef REHLDS_FIXES
+	// After the details update, so that the answers match what Steam has just been told
+	A2SCache_Frame();
+#endif
+
 	if (fCurTime - s_fLastRunCallback > 0.1)
 	{
 		CRehldsPlatformHolder::get()->SteamGameServer_RunCallbacks();
 		s_fLastRunCallback = fCurTime;
+#ifdef REHLDS_FIXES
+		s_bSteamOutgoingPending = true;
+#endif
 	}
 
+#ifdef REHLDS_FIXES
+	bool onDemand = sv_steam_on_demand.value != 0.0f;
+	if ((onDemand && s_bSteamOutgoingPending) || fCurTime - s_fLastRunSendPackets > (onDemand ? 0.1 : 0.01))
+#else
 	if (fCurTime - s_fLastRunSendPackets > 0.01)
+#endif
 	{
 		s_fLastRunSendPackets = fCurTime;
+#ifdef REHLDS_FIXES
+		s_bSteamOutgoingPending = false;
+#endif
 
 		uint16 port;
 		uint32 ip;
@@ -536,10 +680,21 @@ void CSteam3Server::SendUpdatedServerDetails()
 	if (maxPlayers < 0)
 		maxPlayers = g_psvs.maxclients;
 
+#ifdef REHLDS_FIXES
+	if (Steam_DetailChanged(s_SteamServerDetails.maxPlayers, maxPlayers))
+		CRehldsPlatformHolder::get()->SteamGameServer()->SetMaxPlayerCount(maxPlayers);
+	if (Steam_DetailChanged(s_SteamServerDetails.botCount, botCount))
+		CRehldsPlatformHolder::get()->SteamGameServer()->SetBotPlayerCount(botCount);
+	if (Steam_DetailChanged(s_SteamServerDetails.serverName, Cvar_VariableString("hostname")))
+		CRehldsPlatformHolder::get()->SteamGameServer()->SetServerName(Cvar_VariableString("hostname"));
+	if (Steam_DetailChanged(s_SteamServerDetails.mapName, g_psv.name))
+		CRehldsPlatformHolder::get()->SteamGameServer()->SetMapName(g_psv.name);
+#else
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetMaxPlayerCount(maxPlayers);
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetBotPlayerCount(botCount);
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetServerName(Cvar_VariableString("hostname"));
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetMapName(g_psv.name);
+#endif
 
 	UpdateGameTags();
 }
@@ -777,6 +932,9 @@ void Steam_SetCVar(const char *pchKey, const char *pchValue)
 	if (Steam3Server())
 	{
 		CRehldsPlatformHolder::get()->SteamGameServer()->SetKeyValue(pchKey, pchValue);
+#ifdef REHLDS_FIXES
+		A2SCache_Invalidate();
+#endif
 	}
 }
 
@@ -926,4 +1084,7 @@ void Master_SetMaster_f()
 void Steam_HandleIncomingPacket(byte *data, int len, int fromip, uint16 port)
 {
 	CRehldsPlatformHolder::get()->SteamGameServer()->HandleIncomingPacket(data, len, fromip, port);
+#ifdef REHLDS_FIXES
+	s_bSteamOutgoingPending = true;
+#endif
 }

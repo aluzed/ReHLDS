@@ -162,6 +162,7 @@ void Host_InitLocal(void)
 	Cvar_RegisterVariable(&host_profile);
 	Cvar_RegisterVariable(&mp_logfile);
 	Cvar_RegisterVariable(&mp_logecho);
+	AsyncLog_Init();
 	Cvar_RegisterVariable(&sv_log_onefile);
 	Cvar_RegisterVariable(&sv_log_singleplayer);
 	Cvar_RegisterVariable(&sv_logsecret);
@@ -660,10 +661,28 @@ void Host_ClearMemory(qboolean bQuiet)
 	SV_ClearClientStates();
 }
 
+// Target server frame rate: -sys_ticrate on the command line, else the sys_ticrate cvar
+float Host_GetTicrate(void)
+{
+	static int command_line_ticrate = -1;
+	static float command_line_value;
+
+	if (command_line_ticrate == -1)
+	{
+		command_line_ticrate = COM_CheckParm("-sys_ticrate");
+		if (command_line_ticrate > 0)
+			command_line_value = Q_atof(com_argv[command_line_ticrate + 1]);
+	}
+
+	if (command_line_ticrate > 0)
+		return command_line_value;
+
+	return sys_ticrate.value;
+}
+
 qboolean Host_FilterTime(float time)
 {
 	float fps;
-	static int command_line_ticrate = -1;
 
 	if (host_framerate.value > 0.0f)
 	{
@@ -676,17 +695,20 @@ qboolean Host_FilterTime(float time)
 	}
 
 	realtime += sys_timescale.value * time;
+#ifdef REHLDS_FIXES
+	if (g_NetReplay.IsReplaying())
+	{
+		// Recorded frames were all accepted: replay their time
+		realtime = g_NetReplay.ReplayFrame(realtime);
+	}
+	else
+#endif
 	if (g_bIsDedicatedServer)
 	{
-		if (command_line_ticrate == -1)
-			command_line_ticrate = COM_CheckParm("-sys_ticrate");
+		fps = Host_GetTicrate();
 
-		if (command_line_ticrate > 0)
-			fps = Q_atof(com_argv[command_line_ticrate + 1]);
-		else
-			fps = sys_ticrate.value;
-
-		if (fps > 0.0f)
+		// The frame scheduler already paces frames on a fixed tick grid
+		if (fps > 0.0f && !g_FrameScheduler.IsActive())
 		{
 			if (1.0f / (fps + 1.0f) > realtime - oldrealtime)
 				return FALSE;
@@ -722,6 +744,11 @@ qboolean Host_FilterTime(float time)
 				return FALSE;
 		}
 	}
+
+#ifdef REHLDS_FIXES
+	if (g_NetReplay.IsRecording())
+		g_NetReplay.RecordFrame(realtime);
+#endif
 
 	host_frametime = realtime - oldrealtime;
 	oldrealtime = realtime;
@@ -870,7 +897,12 @@ void _Host_Frame(float time)
 
 	//Unknown_windows_func_01D37CD0();
 	if (!Host_FilterTime(time))
+	{
+		g_FrameProfiler.FrameRejected();
 		return;
+	}
+
+	g_FrameProfiler.BeginFrame();
 
 #ifdef REHLDS_FLIGHT_REC
 	static long frameCounter = 0;
@@ -887,14 +919,18 @@ void _Host_Frame(float time)
 	Host_ComputeFPS(host_frametime);
 	R_SetStackBase();
 	CL_CheckClientState();
+	g_FrameProfiler.BeginPhase(FPP_CBUF);
 	Cbuf_Execute();
+	g_FrameProfiler.EndPhase(FPP_CBUF);
 	ClientDLL_UpdateClientData();
 
 	if (g_psv.active)
 		CL_Move();
 
 	host_times[1] = Sys_FloatTime();
+	g_FrameProfiler.BeginPhase(FPP_SV_FRAME);
 	SV_Frame();
+	g_FrameProfiler.EndPhase(FPP_SV_FRAME);
 	host_times[2] = Sys_FloatTime();
 	SV_CheckForRcon();
 
@@ -946,6 +982,8 @@ void _Host_Frame(float time)
 	}
 	frameCounter++;
 #endif //REHLDS_FLIGHT_REC
+
+	g_FrameProfiler.EndFrame();
 }
 
 int Host_Frame(float time, int iState, int *stateInfo)
@@ -981,7 +1019,10 @@ int Host_Frame(float time, int iState, int *stateInfo)
 		static double timetotal;
 		static int timecount;
 
+#ifndef REHLDS_FIXES
+		// The frame was counted twice, halving the reported average
 		timecount++;
+#endif
 		timetotal += time2 - time1;
 		if (++timecount >= 1000)
 		{
@@ -1094,7 +1135,11 @@ int Host_Init(quakeparms_t *parms)
 {
 	char versionString[256];
 
+#ifdef REHLDS_FIXES
+	CRehldsPlatformHolder::get()->srand((uint32)g_NetReplay.Value(CRehldsPlatformHolder::get()->time(NULL)));
+#else
 	CRehldsPlatformHolder::get()->srand(CRehldsPlatformHolder::get()->time(NULL));
+#endif
 
 	Q_memcpy(&host_parms, parms, sizeof(host_parms));
 	com_argc = parms->argc;
@@ -1147,6 +1192,10 @@ int Host_Init(quakeparms_t *parms)
 
 	//Rehlds Security
 	Rehlds_Security_Init();
+
+	FrameProfiler_Init();
+	FrameScheduler_Init();
+	ParallelSend_Init();
 
 
 	Q_snprintf(versionString, sizeof(versionString), "%s,%i,%i", gpszVersionString, PROTOCOL_VERSION, build_number());
@@ -1247,6 +1296,10 @@ void Host_Shutdown(void)
 	//Rehlds Security
 	Rehlds_Security_Shutdown();
 
+	FrameProfiler_Shutdown();
+	FrameScheduler_Shutdown();
+	ParallelSend_Shutdown();
+
 	Cmd_RemoveGameCmds();
 	Cmd_Shutdown();
 	Cvar_Shutdown();
@@ -1279,6 +1332,7 @@ void Host_Shutdown(void)
 	W_Shutdown();
 	Log_Printf("Server shutdown\n");
 	Log_Close();
+	AsyncLog_Shutdown();
 	COM_Shutdown();
 	CL_Shutdown();
 	DELTA_Shutdown();

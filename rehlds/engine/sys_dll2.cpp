@@ -483,6 +483,10 @@ int Sys_InitGame(const char *lpOrgCmdLine, const char *pBaseDir, void *pwnd, int
 	Sys_InitFloatTime();
 #endif // SWDS
 	FS_LogLevelLoadStarted("Launcher");
+#ifdef REHLDS_FIXES
+	// Before anything reads the clock
+	g_NetReplay.Init(host_parms.argc, host_parms.argv);
+#endif
 	SeedRandomNumberGenerator();
 	TraceInit("Sys_InitMemory()", "Sys_ShutdownMemory()", 0);
 	Sys_InitMemory();
@@ -699,12 +703,51 @@ bool CDedicatedServerAPI::RunFrame()
 	if (eng->GetQuitting())
 		return false;
 
-	eng->Frame();
+#ifdef REHLDS_FIXES
+	if (g_NetReplay.IsReplaying())
+	{
+		// Recorded time drives the frames: run them back to back, returning to the
+		// launcher every 50 ms
+		uint64 sliceEnd = Sys_MonotonicNs() + 50000000ull;
+		do
+		{
+			eng->Frame();
+		} while (!eng->GetQuitting() && Sys_MonotonicNs() < sliceEnd);
+
+		return true;
+	}
+#endif
+
+	if (!g_FrameScheduler.IsEnabled())
+	{
+		eng->Frame();
+		return true;
+	}
+
+	// Run frames on the tick grid for one time slice, see CFrameScheduler
+	g_FrameScheduler.BeginSlice();
+	while (g_FrameScheduler.WaitForNextTick())
+	{
+		eng->Frame();
+		if (eng->GetQuitting())
+			break;
+	}
+	g_FrameScheduler.EndSlice();
+
 	return true;
 }
 
 void CDedicatedServerAPI::AddConsoleText(char *text)
 {
+#ifdef REHLDS_FIXES
+	// A replay takes its console input from the recording
+	if (g_NetReplay.IsReplaying())
+		return;
+
+	if (g_NetReplay.IsRecording())
+		g_NetReplay.RecordConsoleText(text);
+#endif
+
 	Cbuf_AddText(text);
 }
 

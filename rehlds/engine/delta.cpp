@@ -314,8 +314,9 @@ static delta_definition_t g_ClientDataDefinition[] =
 #endif // Delta_definitions_region
 
 #ifdef REHLDS_FIXES
-static double g_TimeWindowBase = -1.0;
-static double g_TimeWindowOffset = 0.0;
+// Per thread (snapshots are encoded on worker threads): engine_thread_state_t
+#define g_TimeWindowBase (ThreadState()->timeWindowBase)
+#define g_TimeWindowOffset (ThreadState()->timeWindowOffset)
 #endif
 
 delta_description_t *DELTA_FindField(delta_t *pFields, const char *pszField)

@@ -22,6 +22,7 @@ project(engine CXX)
 
 option(DEBUG "Build with debug information." OFF)
 option(USE_STATIC_LIBSTDC "Enables static linking libstdc++." OFF)
+option(REHLDS_HELGRIND "Annotates lock-free code for Helgrind/DRD race checks (tools/bench/race_check.sh)." OFF)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -175,18 +176,29 @@ set(ENGINE_SRCS
 	engine/sse_mathfun.cpp
 	engine/public_amalgamation.cpp
 	rehlds/flight_recorder.cpp
+	rehlds/frame_profiler.cpp
+	rehlds/frame_scheduler.cpp
+	rehlds/async_log_writer.cpp
 	rehlds/FlightRecorderImpl.cpp
 	rehlds/hookchains_impl.cpp
 	rehlds/main.cpp
+	rehlds/net_receive_thread.cpp
+	rehlds/net_send_thread.cpp
+	rehlds/a2s_cache.cpp
+	rehlds/net_replay.cpp
+	rehlds/parallel_send.cpp
 	rehlds/platform.cpp
 	rehlds/public_amalgamation.cpp
 	rehlds/rehlds_api_impl.cpp
 	rehlds/rehlds_interfaces_impl.cpp
 	rehlds/rehlds_messagemngr_impl.cpp
 	rehlds/rehlds_security.cpp
+	rehlds/thread_state.cpp
+	rehlds/threading/worker_pool.cpp
 )
 
 set(UNITTESTS_SRCS
+	unittests/async_log_writer_tests.cpp
 	unittests/common_tests.cpp
 	unittests/crc32c_tests.cpp
 	unittests/delta_tests.cpp
@@ -196,7 +208,11 @@ set(UNITTESTS_SRCS
 	unittests/rehlds_tests_shared.cpp
 	unittests/rehlds_tests_shared.h
 	unittests/security_tests.cpp
+	unittests/a2s_cache_tests.cpp
+	unittests/spsc_ring_tests.cpp
 	unittests/struct_offsets_tests.cpp
+	unittests/sys_tests.cpp
+	unittests/worker_pool_tests.cpp
 	unittests/TestRunner.cpp
 	unittests/tmessage_tests.cpp
 	unittests/unicode_tests.cpp
@@ -280,10 +296,15 @@ target_link_libraries(engine PRIVATE
 	dl
 	rt
 	m
+	pthread
 	aelf32
 	bzip2
 	steam_api
 )
+
+if (REHLDS_HELGRIND)
+	target_compile_definitions(engine PRIVATE REHLDS_HELGRIND)
+endif()
 
 if (USE_STATIC_LIBSTDC)
 	target_compile_definitions(engine PRIVATE BUILD_STATIC_LIBSTDC)

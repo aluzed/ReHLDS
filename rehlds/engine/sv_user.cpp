@@ -817,7 +817,7 @@ void SV_RunCmd(usercmd_t* ucmd, int random_seed, qboolean fNetCmd, qboolean fCho
 #ifdef REHLDS_FIXES
 	if (sv_usercmd_custom_random_seed.value)
 	{
-		float fltTimeNow = float(Sys_FloatTime() * 1000.0);
+		float fltTimeNow = float(g_NetReplay.ValueF(Sys_FloatTime()) * 1000.0);
 		random_seed = *reinterpret_cast<int *>((char *)&fltTimeNow);
 	}
 #endif

@@ -41,6 +41,10 @@ public:
 	// updates an ip entry, return true if the ip is allowed, false otherwise
 	bool CheckIP(netadr_t adr);
 
+	// Same with explicit time and limits, for callers that must not read cvars
+	// or go through the platform layer (network receive thread)
+	bool CheckIP(netadr_t adr, time_t curTime, float maxQueriesSec, float maxQueriesSecGlobal, float maxQueriesWindow);
+
 private:
 	enum
 	{
@@ -61,6 +65,7 @@ private:
 	CUtlRBTree<iprate_t, int> m_IPTree;
 	int m_iGlobalCount;
 	long m_lLastTime;
+	long m_lLastTrimTime;
 
 	static bool LessIP(const iprate_t &lhs, const iprate_t &rhs);
 };
