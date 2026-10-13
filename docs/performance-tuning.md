@@ -28,7 +28,7 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
 | `sv_log_async` | MT-301 | 0 | to decide after field validation | Log files written on their own thread, see below |
-| `sv_steam_on_demand` | – | 0 | to decide after field validation | Fewer Steam calls on the main thread, see below |
+| `sv_steam_on_demand` | – | 1 | 1 | Fewer Steam calls on the main thread, see below |
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
 
@@ -259,7 +259,8 @@ frames of 13 µs.
 
 Steam only queues a packet for the game socket in answer to one it was handed (a
 server browser query, a master server challenge) or on its own timers (master server
-heartbeats). With `sv_steam_on_demand 1`, the queue is read on the frame after a
+heartbeats). With `sv_steam_on_demand 1` (the default; 0 restores the original
+behaviour), the queue is read on the frame after a
 packet was handed to Steam or Steam callbacks ran, and every 100 ms otherwise; player
 data is sent only for the players whose name or score changed, and again for all of
 them when the server reconnects to Steam. The Steam phase goes from 4.6 to 1.0 ms per

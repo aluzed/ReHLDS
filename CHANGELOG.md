@@ -8,7 +8,7 @@ Along with reverse engineering, a lot of defects and (potential) bugs were found
 
 ## Unreleased (`feature/multithreading` fork)
 
-Frame timing and network work, all off by default. See [`docs/performance-tuning.md`](docs/performance-tuning.md)
+Frame timing and network work, off by default except `sv_steam_on_demand`. See [`docs/performance-tuning.md`](docs/performance-tuning.md)
 for the recommended settings and [`docs/stories/`](docs/stories/README.md) for the design and measurements.
 
 ### Added
@@ -20,7 +20,7 @@ for the recommended settings and [`docs/stories/`](docs/stories/README.md) for t
 - `-netsend`, `-netsend_queue`, `net_send_stats`: server packets sent from a dedicated thread, a tick's packets in one `sendmmsg` call on Linux; the transmit phase of the frame goes from about 21 µs to 3 µs with 32 players. Experiment (MT-304).
 - `sv_a2s_cache`: with the network thread, server browser queries answered on that thread from a copy of Steam's answers, with its own challenges; answers in 0.1 ms instead of 12 ms, and players can still connect during a query flood. Challenges have their own budget (`sv_a2s_challenges_sec`), so the server stays visible during a flood from spoofed addresses. Experiment (MT-305).
 - `sv_log_async`, `sv_log_async_overflow`, `sv_log_async_stats`: server log file and `qconsole.log` written on a dedicated thread (MT-301).
-- `sv_steam_on_demand`: Steam's outgoing packets read after a packet was handed to Steam and every 100 ms, instead of every 10 ms, and player names and scores sent to Steam only when they change; the Steam phase of the frame goes from 4.6 to 1.0 ms per second with 19 bots. Experiment.
+- `sv_steam_on_demand`: Steam's outgoing packets read after a packet was handed to Steam and every 100 ms, instead of every 10 ms, and player names and scores sent to Steam only when they change; the Steam phase of the frame goes from 4.6 to 1.0 ms per second with 19 bots. On by default.
 - `sys_wake_on_packet`: with the network thread and the scheduler, packets read as they arrive between ticks; takes player movement out of the tick, does not lower the latency players see (MT-102).
 - `-netrecord`, `-netreplay`, `-netsends`: byte-exact session record and replay for regression checks (MT-004).
 - `tools/bench/`: Docker load tests (bots, protocol clients with input latency measurement, HLTV, floods), replay regression, Helgrind race checks and map change checks with Metamod; `tools/staging/`: field validation server (MT-003, MT-004, MT-702).
