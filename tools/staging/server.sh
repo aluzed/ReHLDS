@@ -27,12 +27,12 @@ SERVER_DIR=$STAGING_DIR/hlds
 CONTAINER=rehlds-staging
 PORT=27015
 
-# Opt-in features under validation. FEATURES=0 starts the same build with all of
-# them off (original engine behaviour) for comparison sessions.
+# The fork's optimisations are on by default. FEATURES=0 starts the same build with
+# all of them off (original engine behaviour) for comparison sessions.
 if [ "${FEATURES:-1}" = 0 ]; then
-	FEATURE_ARGS=(+sys_ticrate 1000)
+	FEATURE_ARGS=(+sys_ticrate 1000 "${ORIGINAL_ENGINE_ARGS[@]}")
 else
-	FEATURE_ARGS=(-netthread -sys_threads 2 +sys_ticrate 1000 +sys_scheduler 1 +sv_rehlds_snapshot_spread 1 +sv_parallel_send 1)
+	FEATURE_ARGS=(+sys_ticrate 1000)
 fi
 
 rcon() {

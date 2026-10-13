@@ -27,6 +27,11 @@ frame), `server.log`, `hltv-*.log`, `cpu.txt` (process and main thread), `meta.t
 Set `BENCH_DOCKER_ARGS`, e.g. `--cpuset-cpus=6,7`, to pass extra options to `docker run`,
 and `BENCH_SERVER_ARGS`, e.g. `+sys_scheduler 1`, to append arguments to the server command line.
 
+The fork's optimisations are on by default. To measure the original engine behaviour, pass
+the arguments that turn them all off (`ORIGINAL_ENGINE_ARGS` in `lib/common.sh`):
+`BENCH_SERVER_ARGS="-nonetthread -nonetsend -sys_threads 0 +sys_scheduler 0 +sv_rehlds_snapshot_spread 0 +sv_parallel_send 0 +sv_a2s_cache 0 +sv_log_async 0 +sv_steam_on_demand 0"`.
+Older examples below that turn a feature on are now the default.
+
 ## Scenarios
 
 | Scenario | Load |

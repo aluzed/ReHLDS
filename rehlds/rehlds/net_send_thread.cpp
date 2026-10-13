@@ -110,7 +110,8 @@ void CNetSendThread::Init()
 {
 	Cmd_AddCommand("net_send_stats", Cmd_NetSendStats);
 
-	if (!COM_CheckParm("-netsend"))
+	// On by default; -netsend is still accepted
+	if (COM_CheckParm("-nonetsend"))
 		return;
 
 	// Nothing is sent during a replay
@@ -431,7 +432,7 @@ void CNetSendThread::Cmd_Stats()
 {
 	if (!m_bEnabled)
 	{
-		Con_Printf("Network send thread is off (start the server with -netsend)\n");
+		Con_Printf("Network send thread is off (-nonetsend, or a replay or the testsuite)\n");
 		return;
 	}
 

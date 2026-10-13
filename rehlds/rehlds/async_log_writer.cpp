@@ -7,7 +7,7 @@
 #include <time.h>
 #endif
 
-cvar_t sv_log_async = { "sv_log_async", "0", 0, 0.0f, nullptr };
+cvar_t sv_log_async = { "sv_log_async", "1", 0, 0.0f, nullptr };
 cvar_t sv_log_async_overflow = { "sv_log_async_overflow", "block", 0, 0.0f, nullptr };
 
 namespace
@@ -439,7 +439,7 @@ void *CAsyncLogWriter::ThreadEntry(void *param)
 
 void AsyncLog_Init()
 {
-	Cvar_RegisterVariable(&sv_log_async);
+	Cvar_RegisterFeatureVariable(&sv_log_async);
 	Cvar_RegisterVariable(&sv_log_async_overflow);
 	Cmd_AddCommand("sv_log_async_stats", Cmd_AsyncLogStats);
 }

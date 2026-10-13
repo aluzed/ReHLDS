@@ -363,6 +363,18 @@ void Cvar_SetValue(const char *var_name, float value)
 	Cvar_Set(var_name, val);
 }
 
+void Cvar_RegisterFeatureVariable(cvar_t *variable)
+{
+#ifdef _WIN32
+	// The testsuite (Windows only) records and replays system and Steam calls in
+	// order, so it runs with the original engine behaviour
+	if (g_RehldsRuntimeConfig.testPlayerMode != TPM_DISABLE)
+		variable->string = (char *)"0";
+#endif
+
+	Cvar_RegisterVariable(variable);
+}
+
 void EXT_FUNC Cvar_RegisterVariable(cvar_t *variable)
 {
 	char *oldstr;

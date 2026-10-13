@@ -200,7 +200,8 @@ void CNetReceiveThread::Init()
 	Cvar_RegisterVariable(&net_thread_filter);
 	Cmd_AddCommand("net_thread_stats", Cmd_NetThreadStats);
 
-	if (!COM_CheckParm("-netthread"))
+	// On by default; -netthread is still accepted
+	if (COM_CheckParm("-nonetthread"))
 		return;
 
 	// A replay reads its packets from the recording
@@ -906,7 +907,7 @@ void CNetReceiveThread::Cmd_Stats()
 {
 	if (!m_bEnabled)
 	{
-		Con_Printf("Network thread is off (start the server with -netthread)\n");
+		Con_Printf("Network thread is off (-nonetthread, or a replay or the testsuite)\n");
 		return;
 	}
 

@@ -52,12 +52,26 @@ namespace
 #endif
 	}
 
-	// -sys_threads N, or -sys_threads auto: one per CPU but the main thread's
+	// Workers started without -sys_threads: the field validated setting, fewer on
+	// machines with fewer spare CPUs
+	const int DEFAULT_THREADS = 2;
+
+	// -sys_threads N (0: encoding on the main thread), or -sys_threads auto: one per
+	// CPU but the main thread's
 	int ThreadCountFromCommandLine()
 	{
+#ifdef _WIN32
+		// The testsuite (Windows only) replays the original engine behaviour
+		if (g_RehldsRuntimeConfig.testPlayerMode != TPM_DISABLE)
+			return 0;
+#endif
+
 		int parm = COM_CheckParm("-sys_threads");
 		if (!parm || parm >= com_argc - 1)
-			return 0;
+		{
+			int spare = CpuCount() - 1;
+			return spare < DEFAULT_THREADS ? spare : DEFAULT_THREADS;
+		}
 
 		const char *value = com_argv[parm + 1];
 		int count = Q_stricmp(value, "auto") ? Q_atoi(value) : CpuCount() - 1;
@@ -169,7 +183,7 @@ namespace
 		return "the engine is built without the delta JIT";
 #else
 		if (!s_Workers.IsRunning())
-			return "no worker threads, start the server with -sys_threads N";
+			return "no worker threads (-sys_threads 0, or a single CPU)";
 
 		static char hooked[128];
 		const char *hook = HookedEncodePath();
@@ -187,7 +201,7 @@ namespace
 	{
 		if (!s_Workers.IsRunning())
 		{
-			Con_Printf("No worker threads (start the server with -sys_threads N)\n");
+			Con_Printf("No worker threads (-sys_threads 0, or a single CPU)\n");
 			return;
 		}
 

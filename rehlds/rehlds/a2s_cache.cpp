@@ -8,7 +8,7 @@
 #include <unistd.h>
 #endif
 
-cvar_t sv_a2s_cache = { "sv_a2s_cache", "0", 0, 0.0f, nullptr };
+cvar_t sv_a2s_cache = { "sv_a2s_cache", "1", 0, 0.0f, nullptr };
 cvar_t sv_a2s_challenges_sec = { "sv_a2s_challenges_sec", "0", 0, 0.0f, nullptr };
 
 namespace
@@ -390,7 +390,7 @@ bool A2SChallengeLimit::Check(uint32 ip, uint64 nowNs, float perIpSec, float win
 
 void A2SCache_Init()
 {
-	Cvar_RegisterVariable(&sv_a2s_cache);
+	Cvar_RegisterFeatureVariable(&sv_a2s_cache);
 	Cvar_RegisterVariable(&sv_a2s_challenges_sec);
 	Reset();
 	Q_memset(s_Captures, 0, sizeof(s_Captures));

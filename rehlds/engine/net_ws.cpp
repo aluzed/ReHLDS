@@ -2053,9 +2053,9 @@ void NET_Init()
 	Cvar_RegisterVariable(&net_graphpos);
 
 #ifdef REHLDS_FIXES
-	// -netthread starts the cross-platform receive thread (net_receive_thread.cpp)
+	// The cross-platform receive thread (net_receive_thread.cpp), unless -nonetthread
 	NetReceiveThread_Init();
-	// -netsend starts the send thread (net_send_thread.cpp)
+	// The send thread (net_send_thread.cpp), unless -nonetsend
 	NetSendThread_Init();
 #else
 	if (COM_CheckParm("-netthread"))

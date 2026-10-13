@@ -49,6 +49,8 @@ void Cvar_DirectSet(struct cvar_s *var, const char *value);
 void Cvar_Set(const char *var_name, const char *value);
 void Cvar_SetValue(const char *var_name, float value);
 void Cvar_RegisterVariable(cvar_t *variable);
+// Registers one of the fork's optimisations, on by default, off in the testsuite
+void Cvar_RegisterFeatureVariable(cvar_t *variable);
 NOXREF void Cvar_RemoveHudCvars(void);
 const char *Cvar_IsMultipleTokens(const char *varname);
 qboolean Cvar_Command(void);

@@ -9,7 +9,7 @@
 #include <sys/prctl.h>
 #endif
 
-cvar_t sys_scheduler = { "sys_scheduler", "0", 0, 0.0f, nullptr };
+cvar_t sys_scheduler = { "sys_scheduler", "1", 0, 0.0f, nullptr };
 cvar_t sys_scheduler_slice = { "sys_scheduler_slice", "100", 0, 100.0f, nullptr };
 cvar_t sys_spin_us = { "sys_spin_us", "0", 0, 0.0f, nullptr };
 cvar_t sys_wake_on_packet = { "sys_wake_on_packet", "0", 0, 0.0f, nullptr };
@@ -73,7 +73,7 @@ CFrameScheduler::CFrameScheduler()
 
 void CFrameScheduler::Init()
 {
-	Cvar_RegisterVariable(&sys_scheduler);
+	Cvar_RegisterFeatureVariable(&sys_scheduler);
 	Cvar_RegisterVariable(&sys_scheduler_slice);
 	Cvar_RegisterVariable(&sys_spin_us);
 	Cvar_RegisterVariable(&sys_wake_on_packet);

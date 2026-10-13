@@ -262,8 +262,8 @@ cvar_t sv_rcon_condebug = { "sv_rcon_condebug", "1", 0, 1.0f, nullptr };
 cvar_t sv_rehlds_userinfo_transmitted_fields = { "sv_rehlds_userinfo_transmitted_fields", "", 0, 0.0f, nullptr };
 cvar_t sv_rehlds_attachedentities_playeranimationspeed_fix = {"sv_rehlds_attachedentities_playeranimationspeed_fix", "0", 0, 0.0f, nullptr};
 cvar_t sv_rehlds_local_gametime = {"sv_rehlds_local_gametime", "0", 0, 0.0f, nullptr};
-cvar_t sv_rehlds_snapshot_spread = {"sv_rehlds_snapshot_spread", "0", 0, 0.0f, nullptr};
-cvar_t sv_parallel_send = {"sv_parallel_send", "0", 0, 0.0f, nullptr};
+cvar_t sv_rehlds_snapshot_spread = {"sv_rehlds_snapshot_spread", "1", 0, 0.0f, nullptr};
+cvar_t sv_parallel_send = {"sv_parallel_send", "1", 0, 0.0f, nullptr};
 cvar_t sv_steam_on_demand = {"sv_steam_on_demand", "1", 0, 0.0f, nullptr};
 cvar_t sv_rehlds_send_mapcycle = { "sv_rehlds_send_mapcycle", "0", 0, 0.0f, nullptr };
 cvar_t sv_rehlds_maxclients_from_single_ip = { "sv_rehlds_maxclients_from_single_ip", "5", 0, 5.0f, nullptr };
@@ -9018,9 +9018,9 @@ void SV_Init(void)
 	Cvar_RegisterVariable(&sv_rehlds_userinfo_transmitted_fields);
 	Cvar_RegisterVariable(&sv_rehlds_attachedentities_playeranimationspeed_fix);
 	Cvar_RegisterVariable(&sv_rehlds_local_gametime);
-	Cvar_RegisterVariable(&sv_rehlds_snapshot_spread);
-	Cvar_RegisterVariable(&sv_parallel_send);
-	Cvar_RegisterVariable(&sv_steam_on_demand);
+	Cvar_RegisterFeatureVariable(&sv_rehlds_snapshot_spread);
+	Cvar_RegisterFeatureVariable(&sv_parallel_send);
+	Cvar_RegisterFeatureVariable(&sv_steam_on_demand);
 	Cvar_RegisterVariable(&sv_rehlds_send_mapcycle);
 	Cvar_RegisterVariable(&sv_rehlds_maxclients_from_single_ip);
 
