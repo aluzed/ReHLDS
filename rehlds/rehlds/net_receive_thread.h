@@ -4,6 +4,7 @@
 #include "netadr.h"
 #include "ipratelimit.h"
 #include "threading/spsc_ring.h"
+#include "a2s_cache.h"
 
 #include <atomic>
 #include <memory>
@@ -49,6 +50,13 @@ enum NetThreadDropReason
 // address list is published every frame when it changed, and by SV_ConnectClient
 // before it accepts a client, so that the client's first packets are never
 // dropped. When a plugin hooks PreprocessPacket, every packet is kept.
+//
+// A2S queries (sv_a2s_cache 1, MT-305): with the filter on and no plugin hooking
+// PreprocessPacket or SV_CheckConnectionLessRateLimits, the thread answers them from the
+// copy of Steam's answers the main thread publishes (a2s_cache.h), with its own
+// challenges. They get their own rate limits (the max_queries_* values, counted apart
+// from the other connectionless packets, so that a query flood does not keep players
+// from connecting), then the IP filters, like every connectionless packet.
 class CNetReceiveThread
 {
 public:
@@ -85,6 +93,12 @@ public:
 	// May return early without a packet. sys_wake_on_packet, MT-102.
 	void WaitForPacket(uint64 deadlineNs);
 
+	// Main thread: answers to A2S queries, nullptr to stop answering them
+	void PublishQueryReplies(std::shared_ptr<const A2SReplies> replies);
+
+	// Main thread: whether a query of this type arrived since the last call
+	bool TakeQueryDemand(int queryType);
+
 	void Cmd_Stats();
 
 private:
@@ -118,6 +132,7 @@ private:
 		float maxQueriesSec;
 		float maxQueriesSecGlobal;
 		float maxQueriesWindow;
+		float maxChallengesSec;
 		std::vector<FilterEntry> entries;
 
 		bool dropUnknownAddresses;
@@ -134,6 +149,7 @@ private:
 		float maxQueriesSec;
 		float maxQueriesSecGlobal;
 		float maxQueriesWindow;
+		float maxChallengesSec;
 		int filtersVersion;
 		int numFilters;
 		bool preprocessHooked;
@@ -156,8 +172,15 @@ private:
 	int Drain(SOCKET sock);
 	// Wakes the main thread when it waits in WaitForPacket
 	void WakeMainThread();
-	// Returns NTD_NONE to queue the packet, or the reason for dropping it
-	int Classify(const unsigned char *data, int size, const netadr_t &from, uint64 now);
+	// Returns NTD_NONE to queue the packet, or the reason for dropping it. Sets
+	// queryType when the thread answers the packet itself, with a challenge when
+	// sendChallenge is set.
+	int Classify(const unsigned char *data, int size, const netadr_t &from, uint64 now, int &queryType, bool &sendChallenge);
+	// Whether the published answer to this query can be used
+	bool HasReply(int queryType, uint64 now) const;
+	bool IsValidChallenge(const netadr_t &from, uint32 challenge, uint64 now) const;
+	void SendQueryReply(SOCKET sock, const struct sockaddr *to, int tolen, int queryType);
+	void SendChallenge(SOCKET sock, const struct sockaddr *to, int tolen, const netadr_t &from, uint64 now);
 	bool IsBanned(const netadr_t &from, uint64 now) const;
 	bool IsClientAddress(const netadr_t &from) const;
 	void SendBan(SOCKET sock, const struct sockaddr *to, int tolen, uint64 now);
@@ -210,12 +233,22 @@ private:
 	// and bumps the version; the thread takes a reference when the version changed.
 	std::mutex m_ConfigMutex;
 	std::shared_ptr<const FilterConfig> m_SharedConfig;
+	std::shared_ptr<const A2SReplies> m_SharedReplies;
 	std::atomic<uint32> m_ConfigVersion;
 
 	// Network thread state
 	std::shared_ptr<const FilterConfig> m_Config;
+	std::shared_ptr<const A2SReplies> m_Replies;
 	uint32 m_SeenConfigVersion;
 	CIPRateLimit m_RateLimit;
+	CIPRateLimit m_QueryRateLimit;
+	A2SChallengeLimit m_ChallengeLimit;
+	uint64 m_ChallengeKey[2];	// written before the thread starts
+	uint32 m_NextSplitSequence;
+	unsigned char m_ReplyPacket[MAX_ROUTEABLE_PACKET];
+
+	// Set by the network thread when a query arrives, taken by the main thread
+	std::atomic<bool> m_QueryDemand[A2SQ_COUNT];
 	unsigned char m_Scratch[MAX_UDP_PACKET];
 	uint64 m_BanReplyWindowStart;
 	int m_BanRepliesInWindow;
@@ -224,6 +257,9 @@ private:
 	std::atomic<uint32> m_Received;
 	std::atomic<uint32> m_Dropped[NTD_COUNT];
 	std::atomic<uint32> m_BanReplies;
+	std::atomic<uint32> m_Answered[A2SQ_COUNT];
+	std::atomic<uint32> m_ChallengesSent;
+	std::atomic<uint32> m_ChallengesLimited;	// also counted in the rate limited drops
 	std::atomic<uint32> m_RecvErrors;
 	std::atomic<uint32> m_MaxQueueDepth;
 };

@@ -22,6 +22,8 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `-netthread_queue` | MT-302 | 1024 | 1024 | Queue between the network thread and the game loop |
 | `net_thread_filter` | MT-303 | 1 | 1 | Early filtering on the network thread |
 | `-netsend`, `-netsend_queue` | MT-304 | off, 1024 | to decide after field validation | Packets sent from a dedicated thread |
+| `sv_a2s_cache` | MT-305 | 0 | to decide after field validation | Server browser queries answered by the network thread |
+| `sv_a2s_challenges_sec` | MT-305 | 0 (no cap) | 0, or the upload a host can spare | Most challenges per second sent to browsers with `sv_a2s_cache 1` |
 | `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers with spare cores: 2, 1 (under field validation) | Snapshots encoded on worker threads |
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
@@ -166,6 +168,50 @@ Linux. Measured with 32 players at 100 snapshots/s:
 The thread wakes up about once per frame. `net_send_stats` shows the packets sent, the
 system calls, the wake-ups, and how often the queue was full (should stay at 0; raise
 `-netsend_queue` otherwise).
+
+## Server browser queries on the network thread
+
+On the stock engine, the Steam library answers the server browser queries (`A2S_INFO`,
+`A2S_PLAYER`, `A2S_RULES`): the game loop hands it each query, and sends the answers it
+queues every 10 ms. Steam first answers with a challenge (except to the loopback
+address), so a player's browser waits twice for the game loop and the 10 ms send: the
+ping it shows is about 12 ms too high. Each query costs the game loop 40 to 70 µs in Steam
+(the challenge, then the answer), plus about 20 µs per packet Steam sends.
+
+With `sv_a2s_cache 1` (and `-netthread`, `net_thread_filter 1`), the network thread answers
+these queries itself, as soon as they arrive:
+
+* the game loop asks Steam the queries clients ask, and gives the answers to the network
+  thread; again when an answer is a second old (Steam updates scores, names and hostname
+  once per second) and when players, cvars or the map change. Steam stays the source of
+  the answers: same bytes, plugins that change what Steam reports still do;
+* the network thread hands out its own challenges and answers only the queries that
+  carry one, like Steam, so that it cannot be used to reflect traffic;
+* queries get their own rate limits (the `max_queries_*` values, counted apart from
+  connection attempts), so a query flood no longer keeps players from connecting;
+* queries that get a challenge are counted apart from the ones that get an answer: a
+  flood from spoofed addresses only gets challenges, so it no longer uses up the budget
+  of real browsers. Challenges keep the per address limit (`max_queries_sec` over
+  `max_queries_window`), and `sv_a2s_challenges_sec` caps them for all addresses (0, the
+  default: no cap). A challenge is 9 bytes, no larger than the query: it sends nothing
+  more than the flood back to the addresses the flood claims to come from.
+
+| | `sv_a2s_cache 0` | `sv_a2s_cache 1` |
+|---|---|---|
+| Browser query answered in (with its challenge, same machine) | 12.1 ms | 0.09 ms |
+| Game loop cost | 40 to 70 µs per query, plus the sending | 55 to 90 µs per second and per query type, only while queried |
+| Player connecting during a 50 000 queries/s flood from spoofed addresses | 0/5 | 5/5 |
+| Server visible in browsers during that flood | no | yes (5/5 per query type) |
+
+During that flood the server sends up to `max_queries_sec` challenges per second to each
+spoofed address (here 800 000 in 40 s, 9 bytes each, from 4096 addresses). Lower
+`sv_a2s_challenges_sec` to cap this traffic: past the cap, real browsers again compete
+with the flood for the challenges. Tick timings under flood are the same with and without
+(MT-303 already keeps the flood out of the game loop).
+
+`net_thread_stats` shows the answers sent, the challenges sent and refused by their rate
+limits, and per query type the captures and their cost. While a plugin hooks `PreprocessPacket` or the connectionless
+rate limits through ReAPI, the queries go to the game loop as before.
 
 ## Reading packets on arrival
 

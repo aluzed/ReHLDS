@@ -56,6 +56,7 @@
 #include "frame_scheduler.h"
 #include "net_receive_thread.h"
 #include "net_send_thread.h"
+#include "a2s_cache.h"
 #include "threading/worker_pool.h"
 #include "parallel_send.h"
 #include "net_replay.h"

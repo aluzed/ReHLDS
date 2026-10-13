@@ -183,6 +183,7 @@ set(ENGINE_SRCS
 	rehlds/main.cpp
 	rehlds/net_receive_thread.cpp
 	rehlds/net_send_thread.cpp
+	rehlds/a2s_cache.cpp
 	rehlds/net_replay.cpp
 	rehlds/parallel_send.cpp
 	rehlds/platform.cpp
@@ -205,6 +206,7 @@ set(UNITTESTS_SRCS
 	unittests/rehlds_tests_shared.cpp
 	unittests/rehlds_tests_shared.h
 	unittests/security_tests.cpp
+	unittests/a2s_cache_tests.cpp
 	unittests/spsc_ring_tests.cpp
 	unittests/struct_offsets_tests.cpp
 	unittests/sys_tests.cpp

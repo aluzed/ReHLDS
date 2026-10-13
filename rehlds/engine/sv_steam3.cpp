@@ -356,6 +356,9 @@ bool CSteam3Server::NotifyClientConnect(client_t *client, const void *pvSteam2Ke
 
 	bRet = CRehldsPlatformHolder::get()->SteamGameServer()->SendUserConnectAndAuthenticate(htonl(client->network_userid.clientip), pvSteam2Key, ucbSteam2Key, &steamIDClient);
 	client->network_userid.m_SteamID = steamIDClient.ConvertToUint64();
+#ifdef REHLDS_FIXES
+	A2SCache_Invalidate();
+#endif
 
 	return bRet;
 }
@@ -368,6 +371,9 @@ bool CSteam3Server::NotifyBotConnect(client_t *client)
 	client->network_userid.idtype = AUTH_IDTYPE_LOCAL;
 	CSteamID steamId = CRehldsPlatformHolder::get()->SteamGameServer()->CreateUnauthenticatedUserConnection();
 	client->network_userid.m_SteamID = steamId.ConvertToUint64();
+#ifdef REHLDS_FIXES
+	A2SCache_Invalidate();
+#endif
 	return true;
 }
 
@@ -379,6 +385,9 @@ void CSteam3Server::NotifyClientDisconnect(client_t *cl)
 	if (cl->network_userid.idtype == AUTH_IDTYPE_STEAM || cl->network_userid.idtype == AUTH_IDTYPE_LOCAL)
 	{
 		CRehldsPlatformHolder::get()->SteamGameServer()->SendUserDisconnect(cl->network_userid.m_SteamID);
+#ifdef REHLDS_FIXES
+		A2SCache_Invalidate();
+#endif
 	}
 }
 
@@ -408,6 +417,10 @@ void CSteam3Server::NotifyOfLevelChange(bool bForce)
 		}
 		CRehldsPlatformHolder::get()->SteamGameServer()->SetKeyValue(var->name, szVal);
 	}
+
+#ifdef REHLDS_FIXES
+	A2SCache_Invalidate();
+#endif
 }
 
 void CSteam3Server::RunFrame()
@@ -475,6 +488,11 @@ void CSteam3Server::RunFrame()
 			}
 		}
 	}
+
+#ifdef REHLDS_FIXES
+	// After the details update, so that the answers match what Steam has just been told
+	A2SCache_Frame();
+#endif
 
 	if (fCurTime - s_fLastRunCallback > 0.1)
 	{
@@ -777,6 +795,9 @@ void Steam_SetCVar(const char *pchKey, const char *pchValue)
 	if (Steam3Server())
 	{
 		CRehldsPlatformHolder::get()->SteamGameServer()->SetKeyValue(pchKey, pchValue);
+#ifdef REHLDS_FIXES
+		A2SCache_Invalidate();
+#endif
 	}
 }
 

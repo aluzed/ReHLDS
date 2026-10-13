@@ -236,6 +236,9 @@
     <ClCompile Include="..\unittests\spsc_ring_tests.cpp">
       <Filter>unittests</Filter>
     </ClCompile>
+    <ClCompile Include="..\unittests\a2s_cache_tests.cpp">
+      <Filter>unittests</Filter>
+    </ClCompile>
     <ClCompile Include="..\unittests\worker_pool_tests.cpp">
       <Filter>unittests</Filter>
     </ClCompile>
@@ -333,6 +336,7 @@
       <Filter>rehlds</Filter>
     </ClCompile>
     <ClCompile Include="..\rehlds\net_send_thread.cpp">
+    <ClCompile Include="..\rehlds\a2s_cache.cpp">
       <Filter>rehlds</Filter>
     </ClCompile>
     <ClCompile Include="..\rehlds\net_replay.cpp">
@@ -1076,6 +1080,7 @@
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\net_send_thread.h">
+    <ClInclude Include="..\rehlds\a2s_cache.h">
       <Filter>rehlds</Filter>
     </ClInclude>
     <ClInclude Include="..\rehlds\net_replay.h">
