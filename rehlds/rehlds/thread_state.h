@@ -26,6 +26,15 @@ struct engine_thread_state_t
 	// the pings and the events gathered for it
 	client_snapshot_t *encodingSnapshot;
 
+	// Game DLL conditional encoders (see encoder_record_t). Main thread, gather: the
+	// fields they set and unset go to this record instead of the marks
+	encoder_record_t *encoderRecord;
+	// Encoding: the encoders are replayed from this record, in order. A call that is
+	// not the next recorded one sets encoderReplayMiss and changes nothing
+	const encoder_record_t *encoderReplay;
+	int encoderReplayCursor;
+	bool encoderReplayMiss;
+
 	// Delta fields marked by the last check, per delta description (delta_jit.cpp)
 	delta_jit_marks_t deltaMarks[MAX_DELTA_JITS];
 

@@ -22,13 +22,19 @@ namespace
 	bool s_bActive = false;
 	// A plugin hooks SV_EmitPings: the snapshots with pings are encoded on the main thread
 	bool s_bPingsOnMainThread = false;
-	// The workers encode while the main thread gathers, see parallel_send.h
-	bool s_bOverlapGather = false;
+	// The game DLL has conditional encoders: the main thread records them during the
+	// gather, the workers replay them, see encoder_record_t
+	bool s_bRecordEncoders = false;
 
 	// Snapshots encoded by the workers in the current frame, and since the start
 	std::atomic<uint32> s_EncodedOnWorkers(0);
 	uint64 s_TotalOnWorkers = 0;
 	uint64 s_TotalOnMainThread = 0;
+
+	// Snapshots the main thread encoded because their encoders were not recorded (full
+	// updates, record full) or did not replay, since the start
+	uint64 s_TotalNotRecorded = 0;
+	uint64 s_TotalReplayMisses = 0;
 
 	// What was logged last: whether the snapshots were encoded in parallel, else why not
 	bool s_bLogged = false;
@@ -89,15 +95,60 @@ namespace
 		return s_bPingsOnMainThread && snapshot->sendPings;
 	}
 
+	// Encodes with the game DLL's conditional encoders replayed from the gather's
+	// record. Returns false when the replay did not match: the output is wrong, and
+	// the snapshot is left as gathered, to be encoded again
+	bool EncodeWithRecordedEncoders(client_snapshot_t *snapshot)
+	{
+		// Emitting the events changes the snapshot's copy of the queue
+		event_state_t events;
+		if (snapshot->hasEvents)
+			Q_memcpy(&events, &snapshot->events, sizeof(events));
+
+		engine_thread_state_t *state = ThreadState();
+		state->encoderReplay = &snapshot->encoders;
+		state->encoderReplayCursor = 0;
+		state->encoderReplayMiss = false;
+
+		SV_EncodeClientDatagram(snapshot);
+
+		bool replayed = !state->encoderReplayMiss && state->encoderReplayCursor == snapshot->encoders.numCalls;
+		state->encoderReplay = NULL;
+
+		if (!replayed && snapshot->hasEvents)
+			Q_memcpy(&snapshot->events, &events, sizeof(events));
+
+		return replayed;
+	}
+
 	void EncodeSnapshot(void *context, int index)
 	{
 		client_snapshot_t *snapshot = &((client_snapshot_t *)context)[index];
-		if (snapshot->datagram && !EncodeOnMainThread(snapshot))
+		if (!snapshot->datagram || EncodeOnMainThread(snapshot))
+			return;
+
+		bool mainThread = IsMainThread();
+		if (s_bRecordEncoders)
 		{
-			SV_EncodeClientDatagram(snapshot);
-			if (!IsMainThread())
-				s_EncodedOnWorkers.fetch_add(1, std::memory_order_relaxed);
+			// The main thread, alone in game DLL code once the gather is done, calls
+			// the encoders of what was not recorded or did not replay itself
+			bool encoded = snapshot->encoders.complete && EncodeWithRecordedEncoders(snapshot);
+			if (!encoded)
+			{
+				if (!mainThread)
+				{
+					snapshot->encodeOnMainThread = TRUE;
+					return;
+				}
+
+				SV_EncodeClientDatagram(snapshot);
+			}
 		}
+		else
+			SV_EncodeClientDatagram(snapshot);
+
+		if (!mainThread)
+			s_EncodedOnWorkers.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	// The encode path calls these hookchains for every snapshot: their subscribers
@@ -143,10 +194,15 @@ namespace
 		const char *reason = sv_parallel_send.value != 0.0f ? SerialReason() : "snapshots encoded on the main thread";
 		Con_Printf("%d worker threads, sv_parallel_send %s, %s%s%s\n", s_Workers.NumWorkers(),
 			sv_parallel_send.string, reason ? reason : "snapshots encoded in parallel",
-			reason ? "" : (HasConditionalEncoders() ? " after the gather (game DLL conditional encoders)" : " during the gather"),
+			reason ? "" : " during the gather",
 			(!reason && !g_RehldsHookchains.m_SV_EmitPings.isEmpty()) ? ", except those with pings (a plugin hooks SV_EmitPings)" : "");
 		Con_Printf("  snapshots encoded by the workers %llu, by the main thread %llu\n",
 			(unsigned long long)s_TotalOnWorkers, (unsigned long long)s_TotalOnMainThread);
+		if (HasConditionalEncoders())
+		{
+			Con_Printf("  game DLL conditional encoders recorded during the gather; encoded by the main thread: %llu not recorded (full updates), %llu not replayed\n",
+				(unsigned long long)s_TotalNotRecorded, (unsigned long long)s_TotalReplayMisses);
+		}
 	}
 }
 
@@ -197,21 +253,23 @@ bool ParallelSend_Begin(client_snapshot_t *snapshots)
 	s_pSnapshots = snapshots;
 	s_NumSnapshots = 0;
 	s_bPingsOnMainThread = !g_RehldsHookchains.m_SV_EmitPings.isEmpty();
-	s_bOverlapGather = !HasConditionalEncoders();
+	s_bRecordEncoders = HasConditionalEncoders();
 	s_bActive = true;
-	DELTAJit_SerialiseConditionalEncoders(true);
 
-	// Wakes the workers now, so that they are running when the snapshots are published:
-	// as they are gathered, or else all of them in ParallelSend_Finish
+	// Wakes the workers now, so that they are running when the snapshots are published
 	s_Workers.BeginBatch(EncodeSnapshot, snapshots);
 	return true;
+}
+
+bool ParallelSend_RecordsEncoders()
+{
+	return s_bActive && s_bRecordEncoders;
 }
 
 void ParallelSend_Publish(int count)
 {
 	s_NumSnapshots = count;
-	if (s_bOverlapGather)
-		s_Workers.Publish(count);
+	s_Workers.Publish(count);
 }
 
 void ParallelSend_Finish()
@@ -219,22 +277,26 @@ void ParallelSend_Finish()
 	if (!s_bActive)
 		return;
 
-	if (!s_bOverlapGather)
-		s_Workers.Publish(s_NumSnapshots);
-
 	s_Workers.Finish();
-	DELTAJit_SerialiseConditionalEncoders(false);
 
-	if (s_bPingsOnMainThread)
+	for (int i = 0; i < s_NumSnapshots; i++)
 	{
-		for (int i = 0; i < s_NumSnapshots; i++)
+		client_snapshot_t *snapshot = &s_pSnapshots[i];
+		if (!snapshot->datagram)
+			continue;
+
+		if (snapshot->encodeOnMainThread)
 		{
-			client_snapshot_t *snapshot = &s_pSnapshots[i];
-			if (snapshot->datagram && EncodeOnMainThread(snapshot))
-			{
-				host_client = snapshot->client;
-				SV_EncodeClientDatagram(snapshot);
-			}
+			if (snapshot->encoders.complete)
+				s_TotalReplayMisses++;
+			else
+				s_TotalNotRecorded++;
+		}
+
+		if (snapshot->encodeOnMainThread || EncodeOnMainThread(snapshot))
+		{
+			host_client = snapshot->client;
+			SV_EncodeClientDatagram(snapshot);
 		}
 	}
 

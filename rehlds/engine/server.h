@@ -270,6 +270,35 @@ typedef struct snapshot_clientdata_s
 	qboolean hasWeaponData;
 } snapshot_clientdata_t;
 
+// Game DLL conditional encoders recorded during the gather (MT-404). An encoder
+// (Entity_Encode, Player_Encode in Counter-Strike) is game DLL code that the delta
+// encoding calls for each entity: through Metamod, it must not run on an encoding
+// thread while the main thread runs game DLL code. The main thread runs them while it
+// gathers the snapshot, in the order the encoding will call them, and records which
+// fields they set and unset; the encoding threads replay that. Encoders cannot read
+// the marks, only change them: the replay gives the same marks.
+#define MAX_RECORDED_ENCODER_CALLS	MAX_PACKET_ENTITIES
+#define MAX_RECORDED_ENCODER_OPS	4096
+#define ENCODER_OP_SET			0x80	// else unset; low bits: field index
+
+typedef struct encoder_call_s
+{
+	const struct delta_s *delta;
+	const unsigned char *from;
+	const unsigned char *to;
+	uint16 firstOp;
+	uint16 numOps;
+} encoder_call_t;
+
+typedef struct encoder_record_s
+{
+	qboolean complete;       // FALSE: not recorded, the main thread encodes the snapshot
+	int numCalls;
+	int numOps;
+	encoder_call_t calls[MAX_RECORDED_ENCODER_CALLS];
+	uint8 ops[MAX_RECORDED_ENCODER_OPS];
+} encoder_record_t;
+
 // One client's snapshot for one frame (SV_SendClientMessages), in two phases:
 //  - gather: everything that calls the game DLL or changes server state, on the main
 //    thread, in client order;
@@ -294,12 +323,14 @@ typedef struct client_snapshot_s
 	qboolean unreliableOverflowed;
 	byte unreliable[MAX_DATAGRAM];
 	int unreliableSize;
+	encoder_record_t encoders;   // sv_parallel_send with game DLL conditional encoders
 
 	// Encoded
 	sizebuf_t msg;
 	byte buf[MAX_DATAGRAM];
 	qboolean unreliableDropped;
 	qboolean msgOverflowed;
+	qboolean encodeOnMainThread; // an encoding thread could not replay the encoders
 } client_snapshot_t;
 
 extern char *pr_strings;
@@ -604,6 +635,7 @@ void SV_GatherEntities(client_snapshot_t *snapshot);
 void SV_EncodeEntities(const client_snapshot_t *snapshot, sizebuf_t *msg);
 void SV_GatherClientDatagram(client_snapshot_t *snapshot);
 void SV_EncodeClientDatagram(client_snapshot_t *snapshot);
+void SV_RecordEntityEncoders(client_snapshot_t *snapshot);
 void SV_TransmitClientDatagram(client_snapshot_t *snapshot);
 void SV_CleanupEnts(void);
 qboolean SV_SendClientDatagram(client_t *client);

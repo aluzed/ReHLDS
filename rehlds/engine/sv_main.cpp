@@ -4855,6 +4855,85 @@ int SV_CreatePacketEntities_internal(sv_delta_t type, client_t *client, packet_e
 	return msg->cursize;
 }
 
+#ifdef REHLDS_JIT
+// Main thread, after the snapshot's entities are gathered (sv_parallel_send): runs the
+// game DLL's conditional encoders of its packet entities, with the same (from, to)
+// pairs and in the same order as SV_CreatePacketEntities_internal will, and records
+// what they mark for the encoding threads (encoder_record_t). Keep the two in step:
+// a pair the encoding asks for that was not recorded sends the snapshot back to the
+// main thread, which is correct but slower.
+void SV_RecordEntityEncoders(client_snapshot_t *snapshot)
+{
+	client_t *client = snapshot->client;
+	encoder_record_t *record = &snapshot->encoders;
+	record->complete = FALSE;
+	record->numCalls = 0;
+	record->numOps = 0;
+
+	// Full update: SV_FindBestBaseline picks the baselines, left to the main thread
+	if (client->delta_sequence == -1)
+		return;
+
+	packet_entities_t *to = &client->frames[SV_UPDATE_MASK & client->netchan.outgoing_sequence].entities;
+	packet_entities_t *from = &client->frames[SV_UPDATE_MASK & client->delta_sequence].entities;
+	int oldmax = from->num_entities;
+	int newindex = 0;
+	int oldindex = 0;
+	bool recorded = true;
+
+	// The encoders ask for the current player
+	engine_thread_state_t *threadState = ThreadState();
+	threadState->encodingClient = client;
+
+	while (recorded && (newindex < to->num_entities || oldindex < oldmax))
+	{
+		int newnum = (newindex >= to->num_entities) ? ENTITY_SENTINEL : to->entities[newindex].number;
+		int oldnum = (oldindex >= oldmax) ? ENTITY_SENTINEL : from->entities[oldindex].number;
+
+		if (newnum > oldnum)
+		{
+			// Removed entity, no delta
+			oldindex++;
+			continue;
+		}
+
+		entity_state_t *toState = &to->entities[newindex];
+		qboolean custom = (toState->entityType == ENTITY_BEAM) ? TRUE : FALSE;
+		delta_t *delta = custom ? g_pcustomentitydelta : (SV_IsPlayerIndex(newnum) ? g_pplayerdelta : g_pentitydelta);
+		entity_state_t *fromState;
+
+		if (newnum == oldnum)
+		{
+			fromState = &from->entities[oldindex];
+			oldindex++;
+		}
+		else
+		{
+			// New entity, from its baseline
+			fromState = &g_psv.baselines[newnum];
+			if (sv_instancedbaseline.value && g_psv.instance_baselines->number != 0 && newnum > sv_lastnum)
+			{
+				edict_t *ent = EDICT_NUM(newnum);
+				for (int i = 0; i < g_psv.instance_baselines->number; i++)
+				{
+					if (g_psv.instance_baselines->classname[i] == ent->v.classname)
+					{
+						fromState = &g_psv.instance_baselines->baseline[i];
+						break;
+					}
+				}
+			}
+		}
+
+		recorded = DELTAJit_RecordConditionalEncoder(record, delta, (const unsigned char *)fromState, (const unsigned char *)toState);
+		newindex++;
+	}
+
+	threadState->encodingClient = NULL;
+	record->complete = recorded ? TRUE : FALSE;
+}
+#endif // REHLDS_JIT
+
 void SV_EmitPacketEntities(client_t *client, packet_entities_t *to, sizebuf_t *msg)
 {
 	SV_CreatePacketEntities(client->delta_sequence == -1 ? sv_packet_nodelta : sv_packet_delta, client, to, msg);
@@ -5586,10 +5665,25 @@ void SV_SendClientMessages(void)
 					client_snapshot_t *snapshot = &g_ClientSnapshots[numSnapshots++];
 					snapshot->client = cl;
 					snapshot->datagram = TRUE;
+					snapshot->encoders.complete = FALSE;
+					snapshot->encodeOnMainThread = FALSE;
 					SV_GatherClientDatagram(snapshot);
 
 					if (parallel)
+					{
+#ifdef REHLDS_JIT
+						if (ParallelSend_RecordsEncoders())
+						{
+							// Game DLL code: counted in the gather
+							g_FrameProfiler.BeginPhase(FPP_SEND_DATAGRAM);
+							g_FrameProfiler.BeginPhase(FPP_SEND_GATHER);
+							SV_RecordEntityEncoders(snapshot);
+							g_FrameProfiler.EndPhase(FPP_SEND_GATHER);
+							g_FrameProfiler.EndPhase(FPP_SEND_DATAGRAM);
+						}
+#endif
 						ParallelSend_Publish(numSnapshots);
+					}
 				}
 				else
 					SV_SendClientDatagram(cl);
