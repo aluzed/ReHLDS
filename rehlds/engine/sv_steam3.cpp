@@ -74,6 +74,48 @@ static bool Steam_UserDataChanged(int slot, client_t *cl)
 	return true;
 }
 
+// sv_steam_on_demand 1: what was last sent to Steam about the server, so that the once
+// a second update only calls the setters whose value changed (each call costs about
+// 20 us: the whole update took about 210 us every second on the field server).
+// Everything is sent again on map change and when the server (re)connects to Steam
+struct SteamServerDetails
+{
+	bool valid;
+	int maxPlayers;
+	int botCount;
+	int passwordProtected;
+	char serverName[256];
+	char mapName[64];
+	char gameDescription[64];
+};
+
+static SteamServerDetails s_SteamServerDetails;
+
+static void Steam_ForgetServerDetails()
+{
+	Q_memset(&s_SteamServerDetails, 0, sizeof(s_SteamServerDetails));
+}
+
+// Whether the value must be sent to Steam, and remembers it if so
+static bool Steam_DetailChanged(int &sent, int value)
+{
+	if (sv_steam_on_demand.value != 0.0f && s_SteamServerDetails.valid && sent == value)
+		return false;
+
+	sent = value;
+	return true;
+}
+
+template <size_t N>
+static bool Steam_DetailChanged(char (&sent)[N], const char *value)
+{
+	if (sv_steam_on_demand.value != 0.0f && s_SteamServerDetails.valid && !Q_strncmp(sent, value, N - 1))
+		return false;
+
+	Q_strlcpy(sent, value);
+	return true;
+}
+
 void Steam_OutgoingPacketsPending()
 {
 	s_bSteamOutgoingPending = true;
@@ -104,8 +146,9 @@ void CSteam3Server::OnLogonSuccess(SteamServersConnected_t *pLogonSuccess)
 
 	m_SteamIDGS = CRehldsPlatformHolder::get()->SteamGameServer()->GetSteamID();
 #ifdef REHLDS_FIXES
-	// Tell the (re)connected Steam servers about every player again
+	// Tell the (re)connected Steam servers about every player and the server again
 	Steam_ForgetUserData();
+	Steam_ForgetServerDetails();
 #endif
 	CSteam3Server::SendUpdatedServerDetails();
 }
@@ -299,6 +342,9 @@ CSteam3Server::CSteam3Server() :
 
 void CSteam3Server::Activate()
 {
+#ifdef REHLDS_FIXES
+	Steam_ForgetServerDetails();
+#endif
 	bool bLanOnly;
 	int argSteamPort;
 	EServerMode eSMode;
@@ -450,6 +496,9 @@ void CSteam3Server::NotifyClientDisconnect(client_t *cl)
 
 void CSteam3Server::NotifyOfLevelChange(bool bForce)
 {
+#ifdef REHLDS_FIXES
+	Steam_ForgetServerDetails();
+#endif
 	SendUpdatedServerDetails();
 	bool iHasPW = (sv_password.string[0] && Q_stricmp(sv_password.string, "none"));
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetPasswordProtected(iHasPW);
@@ -511,11 +560,17 @@ void CSteam3Server::RunFrame()
 		m_bHasActivePlayers = bHasPlayers;
 		SendUpdatedServerDetails();
 		bool iHasPW = (sv_password.string[0] && Q_stricmp(sv_password.string, "none"));
+#ifdef REHLDS_FIXES
+		if (Steam_DetailChanged(s_SteamServerDetails.passwordProtected, iHasPW ? 1 : 0))
+#endif
 		CRehldsPlatformHolder::get()->SteamGameServer()->SetPasswordProtected(iHasPW);
 
 #ifdef REHLDS_FIXES
 		// Let's get it an up-to-date description of the game
-		CRehldsPlatformHolder::get()->SteamGameServer()->SetGameDescription(gEntityInterface.pfnGetGameDescription());
+		const char *description = gEntityInterface.pfnGetGameDescription();
+		if (Steam_DetailChanged(s_SteamServerDetails.gameDescription, description ? description : ""))
+			CRehldsPlatformHolder::get()->SteamGameServer()->SetGameDescription(description);
+		s_SteamServerDetails.valid = true;
 #endif
 
 		for (int i = 0; i < g_psvs.maxclients; i++)
@@ -625,10 +680,21 @@ void CSteam3Server::SendUpdatedServerDetails()
 	if (maxPlayers < 0)
 		maxPlayers = g_psvs.maxclients;
 
+#ifdef REHLDS_FIXES
+	if (Steam_DetailChanged(s_SteamServerDetails.maxPlayers, maxPlayers))
+		CRehldsPlatformHolder::get()->SteamGameServer()->SetMaxPlayerCount(maxPlayers);
+	if (Steam_DetailChanged(s_SteamServerDetails.botCount, botCount))
+		CRehldsPlatformHolder::get()->SteamGameServer()->SetBotPlayerCount(botCount);
+	if (Steam_DetailChanged(s_SteamServerDetails.serverName, Cvar_VariableString("hostname")))
+		CRehldsPlatformHolder::get()->SteamGameServer()->SetServerName(Cvar_VariableString("hostname"));
+	if (Steam_DetailChanged(s_SteamServerDetails.mapName, g_psv.name))
+		CRehldsPlatformHolder::get()->SteamGameServer()->SetMapName(g_psv.name);
+#else
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetMaxPlayerCount(maxPlayers);
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetBotPlayerCount(botCount);
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetServerName(Cvar_VariableString("hostname"));
 	CRehldsPlatformHolder::get()->SteamGameServer()->SetMapName(g_psv.name);
+#endif
 
 	UpdateGameTags();
 }

@@ -65,3 +65,26 @@ field server with 19 bots, same build and settings:
 A query handed to Steam (A2S cache off) is answered in 0.4 ms, instead of up to 10 ms.
 The once a second spike left (about 200 to 300 µs) is the server details update
 (`SendUpdatedServerDetails`, `SetGameDescription`), not the player data.
+
+### Server details sent when they change
+
+Measured on the field server (temporary timers, 19 bots): every Steam call costs about
+20 µs, and the once a second update made seven of them whatever changed: server details
+(max players, bots, name, map, tags) about 120 µs, `SetPasswordProtected` 22 µs,
+`SetGameDescription` 22 µs, `WasRestartRequested` 20 µs, plus 23 µs per player whose data
+changed. With `sv_steam_on_demand 1`, the setters are only called when their value
+changed since the last call; everything is sent again on map change, on activation and
+when the server reconnects to Steam. `WasRestartRequested` is still asked every second.
+
+Before (`feature/multithreading` `c5e7fbf`) and after, 60 s profiles on the field server,
+19 bots, two runs each, alternated:
+
+| | Before | After |
+|---|---|---|
+| Steam phase | 1.00, 0.99 ms/s | 0.86, 0.90 ms/s |
+| Frames with a Steam phase of 100 µs or more | 1.03, 1.05 per second | 0.13, 0.25 per second |
+| Steam phase p99.99 | 265, 243 µs | 111, 144 µs |
+
+A hostname change reaches the server browser answers within a second, a map change
+updates the map name and the bot count, and the server stays registered with the
+master server.
