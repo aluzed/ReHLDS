@@ -27,6 +27,18 @@ namespace
 
 	const uint64 NS_PER_SEC = 1000000000ull;
 
+	// Answers older than this are not used, the queries go to the main thread again:
+	// nobody asked for them for a while, or the main thread no longer captures them
+	// (Steam stopped). Asked for, they are captured again after one second.
+	const uint64 MAX_REPLY_AGE_NS = 2 * NS_PER_SEC;
+
+	// Split sequence numbers of the answers sent by the thread, far from those of
+	// NET_SendLong (a counter from 1 for every split packet the server sends)
+	const uint32 FIRST_SPLIT_SEQUENCE = 0x40000000;
+
+	// A challenge is valid for the period it was given in and the next one
+	const uint64 CHALLENGE_PERIOD_NS = 30 * NS_PER_SEC;
+
 	const char *const s_DropReasonNames[NTD_COUNT] =
 	{
 		"queue full",
@@ -115,6 +127,7 @@ CNetReceiveThread::CNetReceiveThread() :
 #endif
 	m_ConfigVersion(0),
 	m_SeenConfigVersion(0),
+	m_NextSplitSequence(FIRST_SPLIT_SEQUENCE),
 	m_BanReplyWindowStart(0),
 	m_BanRepliesInWindow(0),
 	m_Received(0),
@@ -124,6 +137,13 @@ CNetReceiveThread::CNetReceiveThread() :
 {
 	for (int i = 0; i < NTD_COUNT; i++)
 		m_Dropped[i].store(0, std::memory_order_relaxed);
+	for (int i = 0; i < A2SQ_COUNT; i++)
+	{
+		m_Answered[i].store(0, std::memory_order_relaxed);
+		m_QueryDemand[i].store(false, std::memory_order_relaxed);
+	}
+	m_ChallengesSent.store(0, std::memory_order_relaxed);
+	m_ChallengeKey[0] = m_ChallengeKey[1] = 0;
 
 	// Statistics are relaxed atomics, read by the main thread for display only
 	RACE_BENIGN(&m_Received, sizeof(m_Received), "statistics");
@@ -131,6 +151,11 @@ CNetReceiveThread::CNetReceiveThread() :
 	RACE_BENIGN(&m_BanReplies, sizeof(m_BanReplies), "statistics");
 	RACE_BENIGN(&m_RecvErrors, sizeof(m_RecvErrors), "statistics");
 	RACE_BENIGN(&m_MaxQueueDepth, sizeof(m_MaxQueueDepth), "statistics");
+	RACE_BENIGN(m_Answered, sizeof(m_Answered), "statistics");
+	RACE_BENIGN(&m_ChallengesSent, sizeof(m_ChallengesSent), "statistics");
+
+	// Hint for the main thread, which captures an answer when a query arrived
+	RACE_BENIGN(m_QueryDemand, sizeof(m_QueryDemand), "flag");
 
 	// Flags: what they guard is synchronised by the config mutex and by pthread_join
 	RACE_BENIGN(&m_ConfigVersion, sizeof(m_ConfigVersion), "flag");
@@ -225,7 +250,15 @@ void CNetReceiveThread::Start(SOCKET serverSocket, SOCKET serverSocketIpx)
 
 	m_Queue.Clear();
 	m_Config.reset();
+	if (!m_ChallengeKey[0] && !m_ChallengeKey[1])
+		A2S_RandomKey(m_ChallengeKey);
 	m_SeenConfigVersion = m_ConfigVersion.load();
+
+	// The answers published before a restart (new sockets) are still valid
+	{
+		std::lock_guard<std::mutex> lock(m_ConfigMutex);
+		m_Replies = m_SharedReplies;
+	}
 
 	// Wake handle of WaitForPacket; without it the main thread sleeps until the tick
 #ifdef _WIN32
@@ -522,6 +555,7 @@ void CNetReceiveThread::Run()
 	}
 
 	m_Config.reset();
+	m_Replies.reset();
 }
 
 bool CNetReceiveThread::WaitReadable(int timeoutMs)
@@ -557,6 +591,7 @@ void CNetReceiveThread::RefreshConfig()
 
 	std::lock_guard<std::mutex> lock(m_ConfigMutex);
 	m_Config = m_SharedConfig;
+	m_Replies = m_SharedReplies;
 	m_SeenConfigVersion = version;
 }
 
@@ -603,7 +638,9 @@ int CNetReceiveThread::Drain(SOCKET sock)
 		SockadrToNetadr(&from, &adr);
 
 		uint64 now = Sys_MonotonicNs();
-		int dropReason = Classify(buffer, size, adr, now);
+		int queryType = A2SQ_NONE;
+		bool sendChallenge = false;
+		int dropReason = Classify(buffer, size, adr, now, queryType, sendChallenge);
 		if (dropReason != NTD_NONE)
 		{
 			Count(m_Dropped[dropReason]);
@@ -611,6 +648,21 @@ int CNetReceiveThread::Drain(SOCKET sock)
 			if (dropReason == NTD_BANNED)
 				SendBan(sock, &from, fromlen, now);
 
+			continue;
+		}
+
+		if (queryType != A2SQ_NONE)
+		{
+			if (sendChallenge)
+			{
+				SendChallenge(sock, &from, fromlen, adr, now);
+				Count(m_ChallengesSent);
+			}
+			else
+			{
+				SendQueryReply(sock, &from, fromlen, queryType);
+				Count(m_Answered[queryType]);
+			}
 			continue;
 		}
 
@@ -633,7 +685,7 @@ int CNetReceiveThread::Drain(SOCKET sock)
 	return queued;
 }
 
-int CNetReceiveThread::Classify(const unsigned char *data, int size, const netadr_t &from, uint64 now)
+int CNetReceiveThread::Classify(const unsigned char *data, int size, const netadr_t &from, uint64 now, int &queryType, bool &sendChallenge)
 {
 	// Rejected by NET_QueuePacket on the synchronous path as well:
 	// oversized packets, and split packets (only the server sends them)
@@ -659,6 +711,34 @@ int CNetReceiveThread::Classify(const unsigned char *data, int size, const netad
 		return NTD_NONE;
 	}
 
+	// A2S queries, when the thread answers them (sv_a2s_cache 1) and the rate limits
+	// are the engine's (no plugin hook): their own rate limits, then the IP filters.
+	// Those it has no answer for yet go to the main thread, where Steam answers them.
+	uint32 challenge;
+	int query = (m_Replies && config->rateLimitEnabled && from.type == NA_IP) ? A2S_ClassifyQuery(data, size, challenge) : A2SQ_NONE;
+	if (query != A2SQ_NONE)
+	{
+		// Tell the main thread that this answer is wanted
+		if (!m_QueryDemand[query].load(std::memory_order_relaxed))
+			m_QueryDemand[query].store(true, std::memory_order_relaxed);
+
+		if (!m_QueryRateLimit.CheckIP(from, (time_t)time(nullptr), config->maxQueriesSec, config->maxQueriesSecGlobal, config->maxQueriesWindow))
+			return NTD_RATE_LIMITED;
+
+		if (IsBanned(from, now))
+			return NTD_BANNED;
+
+		if (HasReply(query, now))
+		{
+			// Like Steam: answers go to addresses that proved they receive packets,
+			// except loopback ones, which cannot be spoofed from the network
+			queryType = query;
+			sendChallenge = from.ip[0] != 127 && !IsValidChallenge(from, challenge, now);
+		}
+
+		return NTD_NONE;
+	}
+
 	// Same order as SV_ReadPackets: rate limits, then IP filters
 	if (config->rateLimitEnabled
 		&& !m_RateLimit.CheckIP(from, (time_t)time(nullptr), config->maxQueriesSec, config->maxQueriesSecGlobal, config->maxQueriesWindow))
@@ -668,6 +748,61 @@ int CNetReceiveThread::Classify(const unsigned char *data, int size, const netad
 		return NTD_BANNED;
 
 	return NTD_NONE;
+}
+
+bool CNetReceiveThread::HasReply(int queryType, uint64 now) const
+{
+	const A2SReplies *replies = m_Replies.get();
+	if (!replies)
+		return false;
+
+	const A2SReplies::Reply &reply = replies->replies[queryType];
+	return !reply.packet.empty() && now - reply.capturedNs <= MAX_REPLY_AGE_NS;
+}
+
+bool CNetReceiveThread::IsValidChallenge(const netadr_t &from, uint32 challenge, uint64 now) const
+{
+	if (challenge == A2S_NO_CHALLENGE)
+		return false;
+
+	uint32 ip = *(const uint32 *)from.ip;
+	uint64 period = now / CHALLENGE_PERIOD_NS;
+	return challenge == A2S_MakeChallenge(m_ChallengeKey, ip, period)
+		|| challenge == A2S_MakeChallenge(m_ChallengeKey, ip, period - 1);
+}
+
+void CNetReceiveThread::SendChallenge(SOCKET sock, const struct sockaddr *to, int tolen, const netadr_t &from, uint64 now)
+{
+	// Same packet as Steam's challenges
+	uint32 challenge = A2S_MakeChallenge(m_ChallengeKey, *(const uint32 *)from.ip, now / CHALLENGE_PERIOD_NS);
+
+	unsigned char packet[9];
+	*(int32 *)packet = -1;
+	packet[4] = S2C_CHALLENGE;
+	Q_memcpy(&packet[5], &challenge, sizeof(challenge));
+
+	sendto(sock, (const char *)packet, sizeof(packet), 0, to, tolen);
+}
+
+void CNetReceiveThread::SendQueryReply(SOCKET sock, const struct sockaddr *to, int tolen, int queryType)
+{
+	const std::vector<unsigned char> &packet = m_Replies->replies[queryType].packet;
+	int size = (int)packet.size();
+	int count = A2S_SplitCount(size);
+
+	uint32 sequence = 0;
+	if (count > 1)
+	{
+		sequence = m_NextSplitSequence++;
+		if (m_NextSplitSequence > 0x7FFFFFFF)
+			m_NextSplitSequence = FIRST_SPLIT_SEQUENCE;
+	}
+
+	for (int part = 0; part < count; part++)
+	{
+		int partSize = A2S_SplitPart(packet.data(), size, part, sequence, m_ReplyPacket);
+		sendto(sock, (const char *)m_ReplyPacket, partSize, 0, to, tolen);
+	}
 }
 
 bool CNetReceiveThread::IsBanned(const netadr_t &from, uint64 now) const
@@ -727,6 +862,25 @@ void CNetReceiveThread::SendBan(SOCKET sock, const struct sockaddr *to, int tole
 	Count(m_BanReplies);
 }
 
+void CNetReceiveThread::PublishQueryReplies(std::shared_ptr<const A2SReplies> replies)
+{
+	{
+		std::lock_guard<std::mutex> lock(m_ConfigMutex);
+		m_SharedReplies = replies;
+	}
+
+	m_ConfigVersion.fetch_add(1, std::memory_order_release);
+}
+
+bool CNetReceiveThread::TakeQueryDemand(int queryType)
+{
+	if (!m_QueryDemand[queryType].load(std::memory_order_relaxed))
+		return false;
+
+	m_QueryDemand[queryType].store(false, std::memory_order_relaxed);
+	return true;
+}
+
 void CNetReceiveThread::Cmd_Stats()
 {
 	if (!m_bEnabled)
@@ -747,9 +901,16 @@ void CNetReceiveThread::Cmd_Stats()
 		Con_Printf("  dropped: %-12s %u\n", s_DropReasonNames[i], m_Dropped[i].load(std::memory_order_relaxed));
 	Con_Printf("  ban replies   %u\n", m_BanReplies.load(std::memory_order_relaxed));
 	Con_Printf("  recv errors   %u\n", m_RecvErrors.load(std::memory_order_relaxed));
+	Con_Printf("  A2S answered  info %u, players %u, rules %u, challenges %u\n",
+		m_Answered[A2SQ_INFO].load(std::memory_order_relaxed),
+		m_Answered[A2SQ_PLAYER].load(std::memory_order_relaxed),
+		m_Answered[A2SQ_RULES].load(std::memory_order_relaxed),
+		m_ChallengesSent.load(std::memory_order_relaxed));
+	A2SCache_Stats();
 }
 
 void NetReceiveThread_Init()
 {
 	g_NetReceiveThread.Init();
+	A2SCache_Init();
 }

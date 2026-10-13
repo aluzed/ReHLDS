@@ -143,6 +143,7 @@
     <ClCompile Include="..\rehlds\frame_profiler.cpp" />
     <ClCompile Include="..\rehlds\frame_scheduler.cpp" />
     <ClCompile Include="..\rehlds\net_receive_thread.cpp" />
+    <ClCompile Include="..\rehlds\a2s_cache.cpp" />
     <ClCompile Include="..\rehlds\net_replay.cpp" />
     <ClCompile Include="..\rehlds\parallel_send.cpp" />
     <ClCompile Include="..\rehlds\thread_state.cpp" />
@@ -209,6 +210,12 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\unittests\spsc_ring_tests.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\unittests\a2s_cache_tests.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release Play|Win32'">true</ExcludedFromBuild>
@@ -482,6 +489,7 @@
     <ClInclude Include="..\rehlds\frame_profiler.h" />
     <ClInclude Include="..\rehlds\frame_scheduler.h" />
     <ClInclude Include="..\rehlds\net_receive_thread.h" />
+    <ClInclude Include="..\rehlds\a2s_cache.h" />
     <ClInclude Include="..\rehlds\net_replay.h" />
     <ClInclude Include="..\rehlds\threading\spsc_ring.h" />
     <ClInclude Include="..\rehlds\parallel_send.h" />

@@ -21,6 +21,7 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `-netthread` | MT-302 | off | on | Network thread, the tick no longer sees floods |
 | `-netthread_queue` | MT-302 | 1024 | 1024 | Queue between the network thread and the game loop |
 | `net_thread_filter` | MT-303 | 1 | 1 | Early filtering on the network thread |
+| `sv_a2s_cache` | MT-305 | 0 | to decide after field validation | Server browser queries answered by the network thread |
 | `-sys_threads`, `sv_parallel_send 1` | MT-403 | 0, 0 | busy servers with spare cores: 2, 1 (under field validation) | Snapshots encoded on worker threads |
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
@@ -147,6 +148,42 @@ Network thread: running, queue 0/1024 packets (max 58), filter on
 `max` is the deepest the queue has been since startup. If `queue full` is not 0, the game
 loop was stalled for longer than the queue holds (a long map change, a plugin blocking):
 raise `-netthread_queue` (64–16384, rounded to a power of two).
+
+## Server browser queries on the network thread
+
+On the stock engine, the Steam library answers the server browser queries (`A2S_INFO`,
+`A2S_PLAYER`, `A2S_RULES`): the game loop hands it each query, and sends the answers it
+queues every 10 ms. Steam first answers with a challenge (except to the loopback
+address), so a player's browser waits twice for the game loop and the 10 ms send: the
+ping it shows is about 12 ms too high. Each query costs the game loop 40 to 70 µs in Steam
+(the challenge, then the answer), plus about 20 µs per packet Steam sends.
+
+With `sv_a2s_cache 1` (and `-netthread`, `net_thread_filter 1`), the network thread answers
+these queries itself, as soon as they arrive:
+
+* the game loop asks Steam the queries clients ask, and gives the answers to the network
+  thread; again when an answer is a second old (Steam updates scores, names and hostname
+  once per second) and when players, cvars or the map change. Steam stays the source of
+  the answers: same bytes, plugins that change what Steam reports still do;
+* the network thread hands out its own challenges and answers only the queries that
+  carry one, like Steam, so that it cannot be used to reflect traffic;
+* queries get their own rate limits (the `max_queries_*` values, counted apart from
+  connection attempts), so a query flood no longer keeps players from connecting.
+
+| | `sv_a2s_cache 0` | `sv_a2s_cache 1` |
+|---|---|---|
+| Browser query answered in (with its challenge, same machine) | 12.1 ms | 0.09 ms |
+| Game loop cost | 40 to 70 µs per query, plus the sending | 55 to 90 µs per second and per query type, only while queried |
+| Player connecting during a 50 000 queries/s flood | 0/5 | 5/5 |
+| Server visible in browsers during that flood | no | no |
+
+During a flood the server is still not visible: the queries' global rate limit
+(`max_queries_sec_global`) is used up by the flood, as before. Tick timings under flood are
+the same with and without (MT-303 already keeps the flood out of the game loop).
+
+`net_thread_stats` shows the answers sent, the challenges, and per query type the
+captures and their cost. While a plugin hooks `PreprocessPacket` or the connectionless
+rate limits through ReAPI, the queries go to the game loop as before.
 
 ## Reading packets on arrival
 
