@@ -28,6 +28,7 @@ behaves like upstream ReHLDS. The measurements behind each recommendation are in
 | `sys_threads_spin_us` | MT-403 | 0 | 0 | Workers spin between frames |
 | `sys_wake_on_packet` | MT-102 | 0 | 0 | Packets read on arrival between ticks, see below |
 | `sv_log_async` | MT-301 | 0 | to decide after field validation | Log files written on their own thread, see below |
+| `sv_steam_on_demand` | – | 0 | to decide after field validation | Fewer Steam calls on the main thread, see below |
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
 
@@ -246,6 +247,25 @@ over 10 ms in 30 s (up to 41 ms), none with `sv_log_async 1` (benchmark,
 
 Console output (stdout, the terminal, `screen`) and plugin log files (AMX Mod X's
 `log_amx`, which writes its own files) are not concerned.
+
+## Steam calls
+
+Every 10 ms the engine asks Steam for the packets it wants sent on the game socket
+(`GetNextOutgoingPacket`), and once a second it tells Steam every player's name and
+score (`BUpdateUserData`). On the staging server with 19 bots, the first call cost
+39 µs of the main thread each time, nearly always to find nothing, and the second
+120 to 660 µs: 4.6 ms per second, 10 % of the frame's work, as regular spikes in
+frames of 13 µs.
+
+Steam only queues a packet for the game socket in answer to one it was handed (a
+server browser query, a master server challenge) or on its own timers (master server
+heartbeats). With `sv_steam_on_demand 1`, the queue is read on the frame after a
+packet was handed to Steam or Steam callbacks ran, and every 100 ms otherwise; player
+data is sent only for the players whose name or score changed, and again for all of
+them when the server reconnects to Steam. The Steam phase goes from 4.6 to 1.0 ms per
+second (60 s profile, 19 bots), the longest from 659 to 306 µs. Answers to queries
+handed to Steam leave on the next frame (0.4 ms measured) instead of within 10 ms;
+heartbeats leave up to 100 ms later, which the master server does not notice.
 
 ## Many players and entities: parallel snapshot encoding
 

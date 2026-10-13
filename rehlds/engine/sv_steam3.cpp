@@ -28,6 +28,58 @@
 
 #include "precompiled.h"
 
+#ifdef REHLDS_FIXES
+// sv_steam_on_demand 1: Steam only queues a packet for the game socket in answer to
+// one it was handed (HandleIncomingPacket) or on its own timers (master server
+// heartbeats), and each GetNextOutgoingPacket call costs 20 to 40 us of the main
+// thread even when the queue is empty. The queue is then read on the frame after a
+// packet was handed to Steam or callbacks ran, and every 100 ms otherwise, instead of
+// every 10 ms.
+static bool s_bSteamOutgoingPending;
+
+// sv_steam_on_demand 1: what BUpdateUserData last sent per client slot, so that the
+// once a second update only tells Steam about the players whose name or score changed
+// (each call costs tens of microseconds)
+struct SteamUserData
+{
+	bool valid;
+	int userid;
+	uint64 steamID;
+	float frags;
+	char name[32];
+};
+
+static SteamUserData s_SteamUserData[MAX_CLIENTS];
+
+static void Steam_ForgetUserData()
+{
+	Q_memset(s_SteamUserData, 0, sizeof(s_SteamUserData));
+}
+
+static bool Steam_UserDataChanged(int slot, client_t *cl)
+{
+	SteamUserData &sent = s_SteamUserData[slot];
+	uint64 steamID = cl->network_userid.m_SteamID;
+	float frags = cl->edict->v.frags;
+
+	if (sent.valid && sent.userid == cl->userid && sent.steamID == steamID
+		&& sent.frags == frags && !Q_strcmp(sent.name, cl->name))
+		return false;
+
+	sent.valid = true;
+	sent.userid = cl->userid;
+	sent.steamID = steamID;
+	sent.frags = frags;
+	Q_strlcpy(sent.name, cl->name);
+	return true;
+}
+
+void Steam_OutgoingPacketsPending()
+{
+	s_bSteamOutgoingPending = true;
+}
+#endif
+
 void CSteam3Server::OnGSPolicyResponse(GSPolicyResponse_t *pPolicyResponse)
 {
 	if (CRehldsPlatformHolder::get()->SteamGameServer()->BSecure())
@@ -51,6 +103,10 @@ void CSteam3Server::OnLogonSuccess(SteamServersConnected_t *pLogonSuccess)
 	}
 
 	m_SteamIDGS = CRehldsPlatformHolder::get()->SteamGameServer()->GetSteamID();
+#ifdef REHLDS_FIXES
+	// Tell the (re)connected Steam servers about every player again
+	Steam_ForgetUserData();
+#endif
 	CSteam3Server::SendUpdatedServerDetails();
 }
 
@@ -386,6 +442,7 @@ void CSteam3Server::NotifyClientDisconnect(client_t *cl)
 	{
 		CRehldsPlatformHolder::get()->SteamGameServer()->SendUserDisconnect(cl->network_userid.m_SteamID);
 #ifdef REHLDS_FIXES
+		s_SteamUserData[cl - g_psvs.clients].valid = false;
 		A2SCache_Invalidate();
 #endif
 	}
@@ -468,6 +525,9 @@ void CSteam3Server::RunFrame()
 				continue;
 
 #ifdef REHLDS_FIXES
+			if (sv_steam_on_demand.value != 0.0f && !Steam_UserDataChanged(i, cl))
+				continue;
+
 			ISteamGameServer_BUpdateUserData(cl->network_userid.m_SteamID, cl->name, cl->edict->v.frags);
 #else
 			CRehldsPlatformHolder::get()->SteamGameServer()->BUpdateUserData(cl->network_userid.m_SteamID, cl->name, cl->edict->v.frags);
@@ -498,11 +558,22 @@ void CSteam3Server::RunFrame()
 	{
 		CRehldsPlatformHolder::get()->SteamGameServer_RunCallbacks();
 		s_fLastRunCallback = fCurTime;
+#ifdef REHLDS_FIXES
+		s_bSteamOutgoingPending = true;
+#endif
 	}
 
+#ifdef REHLDS_FIXES
+	bool onDemand = sv_steam_on_demand.value != 0.0f;
+	if ((onDemand && s_bSteamOutgoingPending) || fCurTime - s_fLastRunSendPackets > (onDemand ? 0.1 : 0.01))
+#else
 	if (fCurTime - s_fLastRunSendPackets > 0.01)
+#endif
 	{
 		s_fLastRunSendPackets = fCurTime;
+#ifdef REHLDS_FIXES
+		s_bSteamOutgoingPending = false;
+#endif
 
 		uint16 port;
 		uint32 ip;
@@ -947,4 +1018,7 @@ void Master_SetMaster_f()
 void Steam_HandleIncomingPacket(byte *data, int len, int fromip, uint16 port)
 {
 	CRehldsPlatformHolder::get()->SteamGameServer()->HandleIncomingPacket(data, len, fromip, port);
+#ifdef REHLDS_FIXES
+	s_bSteamOutgoingPending = true;
+#endif
 }

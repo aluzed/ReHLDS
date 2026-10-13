@@ -163,3 +163,7 @@ CSteam3Server *Steam3Server();
 CSteam3Client *Steam3Client();
 void Master_SetMaster_f();
 void Steam_HandleIncomingPacket(byte *data, int len, int fromip, uint16 port);
+#ifdef REHLDS_FIXES
+// Steam may have queued packets for the game socket: read them on the next frame
+void Steam_OutgoingPacketsPending();
+#endif

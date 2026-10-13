@@ -447,6 +447,7 @@ extern cvar_t sv_rehlds_attachedentities_playeranimationspeed_fix;
 extern cvar_t sv_rehlds_local_gametime;
 extern cvar_t sv_rehlds_snapshot_spread;
 extern cvar_t sv_parallel_send;
+extern cvar_t sv_steam_on_demand;
 extern cvar_t sv_rehlds_send_mapcycle;
 extern cvar_t sv_usercmd_custom_random_seed;
 extern cvar_t sv_rehlds_allow_large_sprays;

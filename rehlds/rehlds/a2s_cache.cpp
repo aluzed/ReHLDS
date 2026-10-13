@@ -94,6 +94,7 @@ namespace
 			}
 
 			reply.packet.assign(packet, packet + packetSize);
+			Steam_OutgoingPacketsPending();
 			break;
 		}
 	}
