@@ -178,6 +178,7 @@ set(ENGINE_SRCS
 	rehlds/flight_recorder.cpp
 	rehlds/frame_profiler.cpp
 	rehlds/frame_scheduler.cpp
+	rehlds/async_log_writer.cpp
 	rehlds/FlightRecorderImpl.cpp
 	rehlds/hookchains_impl.cpp
 	rehlds/main.cpp
@@ -197,6 +198,7 @@ set(ENGINE_SRCS
 )
 
 set(UNITTESTS_SRCS
+	unittests/async_log_writer_tests.cpp
 	unittests/common_tests.cpp
 	unittests/crc32c_tests.cpp
 	unittests/delta_tests.cpp

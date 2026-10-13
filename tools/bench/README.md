@@ -96,6 +96,25 @@ BENCH_SERVER_ARGS="+sys_scheduler 1 +sv_rehlds_snapshot_spread 1" tools/bench/ru
 BENCH_SERVER_ARGS="-netthread +sys_scheduler 1 +sv_rehlds_snapshot_spread 1" tools/bench/run.sh flood-a2s mybuild
 ```
 
+## Slow log device
+
+`slowlog/slow_log_write.c` simulates a slow disk for the server's log files (MT-301):
+loaded with `LD_PRELOAD`, it makes every write to a file under `logs/` or to
+`qconsole.log` sleep `SLOW_LOG_WRITE_MS` milliseconds first (each time the stdio buffer
+is written out, 8 KB). Build it in the benchmark container, then compare:
+
+```sh
+. tools/bench/lib/common.sh
+in_container gcc -m32 -O2 -shared -fPIC -o $BENCH_DIR/slow_log_write.so \
+	$PWD/tools/bench/slowlog/slow_log_write.c -ldl
+export BENCH_DOCKER_ARGS="-e LD_PRELOAD=$BENCH_DIR/slow_log_write.so -e SLOW_LOG_WRITE_MS=20"
+BENCH_SERVER_ARGS="+log on +mp_logdetail 3 +sv_log_async 0" tools/bench/run.sh bots20 mybuild
+BENCH_SERVER_ARGS="+log on +mp_logdetail 3 +sv_log_async 1" tools/bench/run.sh bots20 mybuild
+```
+
+`SLOW_LOG_DEBUG=1` prints the files it wraps and each write. The 64-bit tools of the
+container print a harmless "wrong ELF class" warning.
+
 ## Protocol load client
 
 `loadclient.py` (Python 3, no dependency) connects fake players to the server with the

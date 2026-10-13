@@ -86,7 +86,10 @@ void Log_Printf(const char *fmt, ...)
 			if (mp_logfile.value != 0.0f)
 			{
 				g_FrameProfiler.BeginPhase(FPP_LOG_WRITE);
-				FS_FPrintf((FileHandle_t)g_psvs.log.file, "%s", string);
+				if (AsyncLog_IsFileAsync())
+					AsyncLog_WriteFile(string);
+				else
+					FS_FPrintf((FileHandle_t)g_psvs.log.file, "%s", string);
 				g_FrameProfiler.EndPhase(FPP_LOG_WRITE);
 			}
 		}
@@ -113,6 +116,7 @@ void Log_Close(void)
 	if (g_psvs.log.file)
 	{
 		Log_Printf("Log file closed\n");
+		AsyncLog_EndFile();
 		FS_Close((FileHandle_t)g_psvs.log.file);
 	}
 	g_psvs.log.file = NULL;
@@ -161,6 +165,7 @@ void Log_Open(void)
 				if (fp)
 				{
 					g_psvs.log.file = (void *)fp;
+					AsyncLog_BeginFile(szTestFile);
 					Con_Printf("Server logging data to file %s\n", szTestFile);
 					Log_Printf("Log file started (file \"%s\") (game \"%s\") (version \"%i/%s/%d\")\n", szTestFile, Info_ValueForKey(Info_Serverinfo(), "*gamedir"), PROTOCOL_VERSION, gpszVersionString, build_number());
 				}

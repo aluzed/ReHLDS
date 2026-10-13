@@ -162,6 +162,7 @@ void Host_InitLocal(void)
 	Cvar_RegisterVariable(&host_profile);
 	Cvar_RegisterVariable(&mp_logfile);
 	Cvar_RegisterVariable(&mp_logecho);
+	AsyncLog_Init();
 	Cvar_RegisterVariable(&sv_log_onefile);
 	Cvar_RegisterVariable(&sv_log_singleplayer);
 	Cvar_RegisterVariable(&sv_logsecret);
@@ -1331,6 +1332,7 @@ void Host_Shutdown(void)
 	W_Shutdown();
 	Log_Printf("Server shutdown\n");
 	Log_Close();
+	AsyncLog_Shutdown();
 	COM_Shutdown();
 	CL_Shutdown();
 	DELTA_Shutdown();

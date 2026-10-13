@@ -30,11 +30,54 @@ terminal latency cannot cause lag spikes.
 
 ## Acceptance criteria
 
-* [ ] With a log file on an artificially slow device (e.g. `dm-delay`), `cs32` frame
-      p99 is unaffected with `sv_log_async 1`.
-* [ ] Log content and ordering identical to synchronous mode.
-* [ ] No lost lines on `quit` and on `Sys_Error`.
+* [x] With log files on an artificially slow device (`tools/bench/slowlog`, 20 ms per
+      write), the frame is unaffected with `sv_log_async 1`.
+* [x] Log content and ordering identical to synchronous mode.
+* [x] No lost lines on `quit`. `Sys_Error` waits up to 2 s for the queue (not tested).
 
 ## Out of scope
 
 * Log rotation or format changes.
+
+## Status
+
+Experiment on the `exp/mt301-async-log` branch (2026-10-13), not merged.
+
+* `rehlds/rehlds/async_log_writer.{h,cpp}`: one writer thread (native threads, the
+  engine is built without exceptions), a 4 MB byte queue under a lock, records in
+  order across files. `sv_log_async` (default 0), `sv_log_async_overflow block|drop`
+  (default `block`), `sv_log_async_stats`.
+* The log file is still opened by the main thread through the file system (name,
+  creation, `logsdir`); the writer appends to it through its own handle. The mode is
+  decided when the file is opened, so changing `sv_log_async` takes effect at the next
+  log file. `qconsole.log` keeps its open, write, close per line, now on the writer.
+* The writer flushes its files whenever the queue empties: the log file on disk is
+  more up to date than with the synchronous path (stdio buffer written out every 8 KB),
+  and a crash loses less.
+* Flushed on `Log_Close` (map change, `log off`, quit), at shutdown and in `Sys_Error`
+  (2 s at most, the disk may be stuck).
+* Out of the scope after reading the launcher: console output. `Con_Printf` reaches the
+  terminal through the launcher (`Launcher_ConsolePrintf`, `CTextConsole::Print`),
+  which also redraws the line being typed; calling it from another thread would race
+  with the launcher's own input handling, code the engine does not own. Left
+  synchronous.
+
+Measurements (benchmark, `bots20`, `tools/bench/slowlog` at 20 ms per write, 30 s, two
+runs each):
+
+| | sync | async |
+|---|---|---|
+| Log file only (`mp_logdetail 3`): frames > 10 ms | 0, 0 | 0, 0 |
+| Log file only: frame max | 3.0, 3.1 ms | 2.2, 3.6 ms |
+| With `-condebug`: frames > 10 ms | 7, 5 | 0, 0 |
+| With `-condebug`: frame max | 41.6, 21.2 ms | 2.4, 3.2 ms |
+| With `-condebug`: server FPS | 989, 992 | 1000, 1000 |
+
+The log file alone shows nothing on the benchmark: about 4 KB of log lines per minute,
+the 8 KB stdio buffer is written out about every two minutes, and a 3-minute window
+(`bots20-logs`) caught none of those writes in the frame. On a slow disk the
+synchronous path stalls one frame for the length of that write each time.
+
+Replay (`replay` scenario, `+log on +mp_logdetail 3`) with `sv_log_async 0` and `1`:
+packets byte-identical, log files identical once the timestamps and the file name in
+the first line are removed (207 lines, 13 281 bytes each).

@@ -59,6 +59,7 @@
 #include "a2s_cache.h"
 #include "threading/worker_pool.h"
 #include "parallel_send.h"
+#include "async_log_writer.h"
 #include "net_replay.h"
 
 #include "dlls/cdll_dll.h"
