@@ -1,6 +1,6 @@
 #!/bin/bash
-# Runs a HLDS install with this fork's engine and every option of the
-# feature/multithreading branch on, including the ones that are off by default.
+# Runs a HLDS install with this fork's engine and every multithreading option
+# on, including the ones that are off by default.
 #
 # usage: ./run.sh <hlds dir> [extra server args...]
 #

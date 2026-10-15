@@ -6,7 +6,7 @@ Along with reverse engineering, a lot of defects and (potential) bugs were found
 
 ---
 
-## Unreleased (`feature/multithreading` fork)
+## Unreleased (ReHLDS-MT fork)
 
 Frame timing and network work. The settings validated on the field server are on by default (scheduler, snapshot spreading,
 network and send threads, two encoding workers, A2S cache, asynchronous logs, Steam calls on demand); see

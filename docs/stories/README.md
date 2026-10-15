@@ -76,16 +76,15 @@ frame on target servers, epic 4 is re-scoped.
 ## Branching
 
 * `origin` is the fork `aluzed/ReHLDS-MT`, `upstream` is `rehlds/ReHLDS`.
-* `master` mirrors `upstream/master` and is never committed to directly.
-* All work lives on `feature/multithreading`: one or more commits per story, with the
-  story ID in the commit subject, e.g. `feat: add per-phase server frame profiler (MT-002)`.
+* Validated work lives on `master`: one or more commits per story, with the story ID in
+  the commit subject, e.g. `feat: add per-phase server frame profiler (MT-002)`.
+* Candidate approaches are tried on their own `exp/mt<id>-<topic>` branch, one per
+  approach, and reach `master` only once validated. Branches set aside stay as they are.
 * Sync with upstream:
 
   ```
   git fetch upstream
-  git checkout master && git merge --ff-only upstream/master && git push origin master
-  git checkout feature/multithreading && git rebase master
-  git push --force-with-lease origin feature/multithreading
+  git checkout master && git merge upstream/master && git push origin master
   ```
 
 * Generic, low-risk improvements meant for upstream (see MT-702) are cherry-picked onto

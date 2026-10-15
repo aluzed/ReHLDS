@@ -1,7 +1,7 @@
 # Performance tuning
 
-How to get a steady tick and protect it from packet floods with the options added on the
-`feature/multithreading` branch. The optimisations validated on the field server are on
+How to get a steady tick and protect it from packet floods with the options added by
+this fork. The optimisations validated on the field server are on
 by default; the others stay off. The measurements behind each recommendation are in
 [`benchmarks/`](benchmarks/); the design is in [`stories/`](stories/README.md).
 
