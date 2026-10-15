@@ -35,6 +35,10 @@ With no option, the server runs with the field validated settings:
 | `sv_profile*` | MT-002 | off | on demand | Per-phase frame profiler (`sv_profile_enable 1` records continuously) |
 | `-netrecord`, `-netreplay`, `-netsends` | MT-004 | off | – | Session replay, for developers |
 
+`./run.sh <hlds dir>` builds the engine, installs it and starts the server with every
+option on, the ones off by default included; see the
+[README](../README.md#quick-start-linux).
+
 The cvars can be changed at any time from the console or `server.cfg` (`sv_log_async`
 at the next log file); the threads are started once, from the command line:
 `-nonetthread`, `-nonetsend` and `-sys_threads 0` keep them off. `-netthread` and
