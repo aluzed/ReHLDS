@@ -78,8 +78,6 @@ frame on target servers, epic 4 is re-scoped.
 * `origin` is the fork `aluzed/ReHLDS-MT`, `upstream` is `rehlds/ReHLDS`.
 * Validated work lives on `master`: one or more commits per story, with the story ID in
   the commit subject, e.g. `feat: add per-phase server frame profiler (MT-002)`.
-* Candidate approaches are tried on their own `exp/mt<id>-<topic>` branch, one per
-  approach, and reach `master` only once validated. Branches set aside stay as they are.
 * Sync with upstream:
 
   ```
