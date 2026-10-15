@@ -25,6 +25,7 @@ network and send threads, two encoding workers, A2S cache, asynchronous logs, St
 - `sv_client_lookup_cache`: the client a game packet comes from found through a table indexed by address, each result checked against the slot, instead of comparing every slot's address; packet dispatch 624 -> 502 ns per packet with 32 clients (MT-104).
 - `sys_wake_on_packet`: with the network thread and the scheduler, packets read as they arrive between ticks; takes player movement out of the tick, does not lower the latency players see (MT-102).
 - `-netrecord`, `-netreplay`, `-netsends`: byte-exact session record and replay for regression checks (MT-004).
+- `build-docker.sh`: builds in a container with the 32-bit toolchain, the host needs only Docker; `run.sh`: builds, installs the engine into a HLDS install and starts it with every option of the fork on.
 - `tools/bench/`: Docker load tests (bots, protocol clients with input latency measurement, HLTV, floods), replay regression, Helgrind race checks and map change checks with Metamod; `tools/staging/`: field validation server (MT-003, MT-004, MT-702).
 
 ### Changed

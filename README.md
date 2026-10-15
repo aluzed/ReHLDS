@@ -40,6 +40,26 @@ Design notes and measurements for every change are in [`docs/stories/`](docs/sto
 the field sessions are in [`docs/benchmarks/field-validation.md`](docs/benchmarks/field-validation.md).
 Windows builds have not been run on a server yet.
 
+### Quick start (Linux)
+
+```sh
+./build-docker.sh                 # build in a container, output in build/
+./run.sh /path/to/hlds            # build, install the engine, start with every option on
+```
+
+* `build-docker.sh` builds the engine (`build/rehlds/engine_i486.so`) and the other binaries in
+  a Debian 11 container with the 32-bit toolchain: the host needs only Docker. The image
+  (`tools/bench/docker`) is built on the first run. `./build.sh` builds on the host, which then
+  needs the 32-bit packages listed under [Building](#building).
+* `run.sh <hlds dir> [server args...]` runs `build-docker.sh`, copies the engine over the
+  install's `engine_i486.so` (the original is kept as `engine_i486.so.orig`) and starts
+  `hlds_run` with every option of the fork on, including the ones off by default:
+  `-sys_threads auto`, `sys_spin_us` and `sys_threads_spin_us` 200, `sys_wake_on_packet 1`,
+  `sv_profile_enable 1`. Environment: `GAME`, `MAP`, `PORT`, `MAXPLAYERS`, `TICRATE` (1000),
+  `SYS_THREADS`, `SPIN_US` (0 when the server has no cores of its own: spinning burns them),
+  `WAKE_ON_PACKET`, `PROFILE`, `CPUS` (cores given with `taskset`), `NO_BUILD=1` (use
+  `build/` as it is). Example: `SPIN_US=0 CPUS=2-5 MAP=de_inferno ./run.sh ~/hlds -norestart`.
+
 > [!TIP]
 > ReHLDS linux-releases now is signed via `GPG`, pubkey is: `63547829004f07716f7be4856c32c4282e60fb67` and could be found at [https://keyserver.ubuntu.com/](https://keyserver.ubuntu.com/pks/lookup?search=63547829004f07716f7be4856c32c4282e60fb67+&fingerprint=on&op=index).
 >
@@ -210,6 +230,7 @@ Use `Visual Studio` to build, open `msvc/ReHLDS.sln` and just select from the so
 
 #### Linux
 
+* With Docker, no toolchain on the host: `./build-docker.sh` (see [Quick start](#quick-start-linux)).
 * Optional options using `build.sh --compiler=[gcc] --jobs=[N] -D[option]=[ON or OFF]` (without square brackets)
 
 <pre>

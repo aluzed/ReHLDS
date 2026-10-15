@@ -4,8 +4,8 @@
 #
 # usage: ./run.sh <hlds dir> [extra server args...]
 #
-# The engine built by ./build.sh (build/rehlds/engine_i486.so) is copied over the
-# install's engine_i486.so first; the original is kept as engine_i486.so.orig.
+# The engine is built from the working tree with ./build-docker.sh, then copied over
+# the install's engine_i486.so; the original is kept as engine_i486.so.orig.
 #
 # Environment:
 #   GAME=cstrike  MAP=de_dust2  PORT=27015  MAXPLAYERS=32  TICRATE=1000
@@ -15,17 +15,21 @@
 #   WAKE_ON_PACKET=1     read packets on arrival between ticks (MT-102)
 #   PROFILE=1            record the frame profiler continuously
 #   CPUS=                cores given to the server with taskset (e.g. 2-5)
+#   NO_BUILD=1           use build/rehlds/engine_i486.so as it is
 set -euo pipefail
-
-die() { echo "run.sh: $*" >&2; exit 1; }
+. "$(dirname "$0")/tools/bench/lib/common.sh"
 
 [ $# -ge 1 ] || die "usage: ./run.sh <hlds dir> [extra server args...]"
 HLDS_DIR=$(realpath "$1")
 shift
 
-ENGINE=$(dirname "$(realpath "$0")")/build/rehlds/engine_i486.so
-[ -f "$ENGINE" ] || die "$ENGINE not found, run ./build.sh first"
 [ -x "$HLDS_DIR/hlds_run" ] || die "no hlds_run in $HLDS_DIR"
+
+if [ "${NO_BUILD:-0}" != 1 ]; then
+	"$REPO_ROOT/build-docker.sh"
+fi
+ENGINE=$REPO_ROOT/build/rehlds/engine_i486.so
+[ -f "$ENGINE" ] || die "$ENGINE not found"
 
 if [ -f "$HLDS_DIR/engine_i486.so" ] && [ ! -f "$HLDS_DIR/engine_i486.so.orig" ]; then
 	cp "$HLDS_DIR/engine_i486.so" "$HLDS_DIR/engine_i486.so.orig"
