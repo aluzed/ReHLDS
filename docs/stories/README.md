@@ -75,7 +75,7 @@ frame on target servers, epic 4 is re-scoped.
 
 ## Branching
 
-* `origin` is the fork `aluzed/ReHLDS`, `upstream` is `rehlds/ReHLDS`.
+* `origin` is the fork `aluzed/ReHLDS-MT`, `upstream` is `rehlds/ReHLDS`.
 * `master` mirrors `upstream/master` and is never committed to directly.
 * All work lives on `feature/multithreading`: one or more commits per story, with the
   story ID in the commit subject, e.g. `feat: add per-phase server frame profiler (MT-002)`.

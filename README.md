@@ -1,4 +1,4 @@
-# ReHLDS multithreaded [![C/C++ CI](https://github.com/aluzed/ReHLDS/actions/workflows/build.yml/badge.svg?branch=feature%2Fmultithreading)](https://github.com/aluzed/ReHLDS/actions/workflows/build.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) <img align="right" src="https://user-images.githubusercontent.com/5860435/111066129-040e5e00-84f0-11eb-9e1f-7a7e8611da2b.png" alt="ReHLDS" />
+# ReHLDS multithreaded [![C/C++ CI](https://github.com/aluzed/ReHLDS-MT/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/aluzed/ReHLDS-MT/actions/workflows/build.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE) <img align="right" src="https://user-images.githubusercontent.com/5860435/111066129-040e5e00-84f0-11eb-9e1f-7a7e8611da2b.png" alt="ReHLDS" />
 Reverse-engineered (and bugfixed) HLDS, with a multithreaded server loop
 
 ## What is this?
