@@ -58,7 +58,8 @@ Windows builds have not been run on a server yet.
   `sv_profile_enable 1`. Environment: `GAME`, `MAP`, `PORT`, `MAXPLAYERS`, `TICRATE` (1000),
   `SYS_THREADS`, `SPIN_US` (0 when the server has no cores of its own: spinning burns them),
   `WAKE_ON_PACKET`, `PROFILE`, `CPUS` (cores given with `taskset`), `NO_BUILD=1` (use
-  `build/` as it is). Example: `SPIN_US=0 CPUS=2-5 MAP=de_inferno ./run.sh ~/hlds -norestart`.
+  `build/` as it is), `RESTART=1` (let `hlds_run` restart the server after it exits or crashes;
+  by default `-norestart`). Example: `SPIN_US=0 CPUS=2-5 MAP=de_inferno ./run.sh ~/hlds`.
 
 > [!TIP]
 > ReHLDS linux-releases now is signed via `GPG`, pubkey is: `63547829004f07716f7be4856c32c4282e60fb67` and could be found at [https://keyserver.ubuntu.com/](https://keyserver.ubuntu.com/pks/lookup?search=63547829004f07716f7be4856c32c4282e60fb67+&fingerprint=on&op=index).

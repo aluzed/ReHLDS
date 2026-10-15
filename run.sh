@@ -16,6 +16,8 @@
 #   PROFILE=1            record the frame profiler continuously
 #   CPUS=                cores given to the server with taskset (e.g. 2-5)
 #   NO_BUILD=1           use build/rehlds/engine_i486.so as it is
+#   RESTART=1            let hlds_run restart the server after it exits or crashes
+#                        (default: -norestart)
 set -euo pipefail
 . "$(dirname "$0")/tools/bench/lib/common.sh"
 
@@ -37,7 +39,10 @@ fi
 cp "$ENGINE" "$HLDS_DIR/engine_i486.so"
 
 SPIN_US=${SPIN_US:-200}
+RESTART_ARGS=(-norestart)
+[ "${RESTART:-0}" = 1 ] && RESTART_ARGS=()
 ARGS=(
+	"${RESTART_ARGS[@]}"
 	-game "${GAME:-cstrike}"
 	-port "${PORT:-27015}"
 	+maxplayers "${MAXPLAYERS:-32}"
